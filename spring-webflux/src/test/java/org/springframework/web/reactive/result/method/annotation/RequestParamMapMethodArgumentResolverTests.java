@@ -27,6 +27,7 @@ import reactor.core.publisher.Mono;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ReactiveAdapterRegistry;
 import org.springframework.mock.http.server.reactive.test.MockServerHttpRequest;
+import org.springframework.mock.web.test.server.MockServerWebExchange;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.method.ResolvableMethod;
@@ -36,8 +37,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
-import static org.springframework.mock.http.server.reactive.test.MockServerHttpRequest.post;
 import static org.springframework.web.method.MvcAnnotationPredicates.requestParam;
 
 /**
@@ -46,7 +45,8 @@ import static org.springframework.web.method.MvcAnnotationPredicates.requestPara
  */
 public class RequestParamMapMethodArgumentResolverTests {
 
-	private RequestParamMapMethodArgumentResolver resolver = new RequestParamMapMethodArgumentResolver(new ReactiveAdapterRegistry());
+	private final RequestParamMapMethodArgumentResolver resolver =
+			new RequestParamMapMethodArgumentResolver(ReactiveAdapterRegistry.getSharedInstance());
 
 	private ResolvableMethod testMethod = ResolvableMethod.on(getClass()).named("handle").build();
 
@@ -80,16 +80,7 @@ public class RequestParamMapMethodArgumentResolverTests {
 	@Test
 	public void resolveMapArgumentWithQueryString() throws Exception {
 		MethodParameter param = this.testMethod.annot(requestParam().name("")).arg(Map.class);
-		Object result= resolve(param, MockServerHttpRequest.get("/path?foo=bar").toExchange());
-		assertTrue(result instanceof Map);
-		assertEquals(Collections.singletonMap("foo", "bar"), result);
-	}
-
-	@Test
-	public void resolveMapArgumentWithFormData() throws Exception {
-		MethodParameter param = this.testMethod.annot(requestParam().name("")).arg(Map.class);
-		ServerWebExchange exchange = post("/").contentType(APPLICATION_FORM_URLENCODED).body("foo=bar").toExchange();
-		Object result= resolve(param, exchange);
+		Object result= resolve(param, MockServerWebExchange.from(MockServerHttpRequest.get("/path?foo=bar")));
 		assertTrue(result instanceof Map);
 		assertEquals(Collections.singletonMap("foo", "bar"), result);
 	}
@@ -97,7 +88,7 @@ public class RequestParamMapMethodArgumentResolverTests {
 	@Test
 	public void resolveMultiValueMapArgument() throws Exception {
 		MethodParameter param = this.testMethod.annotPresent(RequestParam.class).arg(MultiValueMap.class);
-		ServerWebExchange exchange = MockServerHttpRequest.get("/path?foo=bar&foo=baz").toExchange();
+		ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/path?foo=bar&foo=baz"));
 		Object result= resolve(param, exchange);
 
 		assertTrue(result instanceof MultiValueMap);

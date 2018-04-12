@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.Arrays;
 import org.springframework.core.DefaultParameterNameDiscoverer;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ParameterNameDiscoverer;
+import org.springframework.lang.Nullable;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.web.bind.WebDataBinder;
@@ -47,6 +48,7 @@ import org.springframework.web.method.HandlerMethod;
  */
 public class InvocableHandlerMethod extends HandlerMethod {
 
+	@Nullable
 	private WebDataBinderFactory dataBinderFactory;
 
 	private HandlerMethodArgumentResolverComposite argumentResolvers = new HandlerMethodArgumentResolverComposite();
@@ -119,10 +121,11 @@ public class InvocableHandlerMethod extends HandlerMethod {
 	 * @param mavContainer the ModelAndViewContainer for this request
 	 * @param providedArgs "given" arguments matched by type, not resolved
 	 * @return the raw value returned by the invoked method
-	 * @exception Exception raised if no suitable argument resolver can be found,
+	 * @throws Exception raised if no suitable argument resolver can be found,
 	 * or if the method raised an exception
 	 */
-	public Object invokeForRequest(NativeWebRequest request, ModelAndViewContainer mavContainer,
+	@Nullable
+	public Object invokeForRequest(NativeWebRequest request, @Nullable ModelAndViewContainer mavContainer,
 			Object... providedArgs) throws Exception {
 
 		Object[] args = getMethodArgumentValues(request, mavContainer, providedArgs);
@@ -141,7 +144,7 @@ public class InvocableHandlerMethod extends HandlerMethod {
 	/**
 	 * Get the method argument values for the current request.
 	 */
-	private Object[] getMethodArgumentValues(NativeWebRequest request, ModelAndViewContainer mavContainer,
+	private Object[] getMethodArgumentValues(NativeWebRequest request, @Nullable ModelAndViewContainer mavContainer,
 			Object... providedArgs) throws Exception {
 
 		MethodParameter[] parameters = getMethodParameters();
@@ -168,7 +171,7 @@ public class InvocableHandlerMethod extends HandlerMethod {
 			}
 			if (args[i] == null) {
 				throw new IllegalStateException("Could not resolve method parameter at index " +
-						parameter.getParameterIndex() + " in " + parameter.getMethod().toGenericString() +
+						parameter.getParameterIndex() + " in " + parameter.getExecutable().toGenericString() +
 						": " + getArgumentResolutionErrorMessage("No suitable resolver for", i));
 			}
 		}
@@ -183,7 +186,8 @@ public class InvocableHandlerMethod extends HandlerMethod {
 	/**
 	 * Attempt to resolve a method parameter from the list of provided argument values.
 	 */
-	private Object resolveProvidedArgument(MethodParameter parameter, Object... providedArgs) {
+	@Nullable
+	private Object resolveProvidedArgument(MethodParameter parameter, @Nullable Object... providedArgs) {
 		if (providedArgs == null) {
 			return null;
 		}

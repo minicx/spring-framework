@@ -18,15 +18,13 @@ package org.springframework.web.reactive.result.method.annotation;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ReactiveAdapterRegistry;
 import org.springframework.core.convert.converter.Converter;
-import org.springframework.util.Assert;
-import org.springframework.util.MultiValueMap;
+import org.springframework.lang.Nullable;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ValueConstants;
@@ -34,7 +32,8 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.ServerWebInputException;
 
 /**
- * Resolver for method arguments annotated with @{@link RequestParam}.
+ * Resolver for method arguments annotated with @{@link RequestParam} from URI
+ * query string parameters.
  *
  * <p>This resolver can also be created in default resolution mode in which
  * simple types (int, long, etc.) not annotated with @{@link RequestParam} are
@@ -69,7 +68,7 @@ public class RequestParamMethodArgumentResolver extends AbstractNamedValueSyncAr
 	 * request parameter name is derived from the method parameter name.
 	 */
 	public RequestParamMethodArgumentResolver(
-			ConfigurableBeanFactory factory, ReactiveAdapterRegistry registry, boolean useDefaultResolution) {
+			@Nullable ConfigurableBeanFactory factory, ReactiveAdapterRegistry registry, boolean useDefaultResolution) {
 
 		super(factory, registry);
 		this.useDefaultResolution = useDefaultResolution;
@@ -82,7 +81,8 @@ public class RequestParamMethodArgumentResolver extends AbstractNamedValueSyncAr
 			return true;
 		}
 		else if (this.useDefaultResolution) {
-			return checkParameterTypeNoReactiveWrapper(param, BeanUtils::isSimpleProperty);
+			return checkParameterTypeNoReactiveWrapper(param, BeanUtils::isSimpleProperty) ||
+					BeanUtils.isSimpleProperty(param.nestedIfOptional().getNestedParameterType());
 		}
 		return false;
 	}
@@ -98,21 +98,13 @@ public class RequestParamMethodArgumentResolver extends AbstractNamedValueSyncAr
 	}
 
 	@Override
-	protected Optional<Object> resolveNamedValue(String name, MethodParameter parameter,
-			ServerWebExchange exchange) {
-
-		List<String> paramValues = getRequestParams(exchange).get(name);
+	protected Object resolveNamedValue(String name, MethodParameter parameter, ServerWebExchange exchange) {
+		List<String> paramValues = exchange.getRequest().getQueryParams().get(name);
 		Object result = null;
 		if (paramValues != null) {
 			result = (paramValues.size() == 1 ? paramValues.get(0) : paramValues);
 		}
-		return Optional.ofNullable(result);
-	}
-
-	private MultiValueMap<String, String> getRequestParams(ServerWebExchange exchange) {
-		MultiValueMap<String, String> params = exchange.getRequestParams().subscribe().peek();
-		Assert.notNull(params, "Expected form data (if any) to be parsed.");
-		return params;
+		return result;
 	}
 
 	@Override

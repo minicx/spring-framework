@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
 import org.springframework.http.server.ServletServerHttpRequest;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.ContentCachingRequestWrapper;
@@ -306,26 +307,39 @@ public abstract class AbstractRequestLoggingFilter extends OncePerRequestFilter 
 		}
 
 		if (isIncludePayload()) {
-			ContentCachingRequestWrapper wrapper =
-					WebUtils.getNativeRequest(request, ContentCachingRequestWrapper.class);
-			if (wrapper != null) {
-				byte[] buf = wrapper.getContentAsByteArray();
-				if (buf.length > 0) {
-					int length = Math.min(buf.length, getMaxPayloadLength());
-					String payload;
-					try {
-						payload = new String(buf, 0, length, wrapper.getCharacterEncoding());
-					}
-					catch (UnsupportedEncodingException ex) {
-						payload = "[unknown]";
-					}
-					msg.append(";payload=").append(payload);
-				}
+			String payload = getMessagePayload(request);
+			if (payload != null) {
+				msg.append(";payload=").append(payload);
 			}
 		}
 
 		msg.append(suffix);
 		return msg.toString();
+	}
+
+	/**
+	 * Extracts the message payload portion of the message created by
+	 * {@link #createMessage(HttpServletRequest, String, String)} when
+	 * {@link #isIncludePayload()} returns true.
+	 * @since 5.0.3
+	 */
+	@Nullable
+	protected String getMessagePayload(HttpServletRequest request) {
+		ContentCachingRequestWrapper wrapper =
+				WebUtils.getNativeRequest(request, ContentCachingRequestWrapper.class);
+		if (wrapper != null) {
+			byte[] buf = wrapper.getContentAsByteArray();
+			if (buf.length > 0) {
+				int length = Math.min(buf.length, getMaxPayloadLength());
+				try {
+					return new String(buf, 0, length, wrapper.getCharacterEncoding());
+				}
+				catch (UnsupportedEncodingException ex) {
+					return "[unknown]";
+				}
+			}
+		}
+		return null;
 	}
 
 

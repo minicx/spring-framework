@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,9 @@
 package org.springframework.web.reactive.result.method.annotation;
 
 import java.util.Map;
-import java.util.Optional;
 
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ReactiveAdapterRegistry;
-import org.springframework.util.Assert;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,6 +40,7 @@ import org.springframework.web.server.ServerWebExchange;
  * request parameters have multiple values.
  *
  * @author Rossen Stoyanchev
+ * @author Sebastien Deleuze
  * @since 5.0
  * @see RequestParamMethodArgumentResolver
  */
@@ -59,21 +58,17 @@ public class RequestParamMapMethodArgumentResolver extends HandlerMethodArgument
 	}
 
 	private boolean allParams(RequestParam requestParam, Class<?> type) {
-		return Map.class.isAssignableFrom(type) && !StringUtils.hasText(requestParam.name());
+		return (Map.class.isAssignableFrom(type) && !StringUtils.hasText(requestParam.name()));
 	}
 
 
 	@Override
-	public Optional<Object> resolveArgumentValue(MethodParameter methodParameter,
-			BindingContext context, ServerWebExchange exchange) {
+	public Object resolveArgumentValue(
+			MethodParameter methodParameter, BindingContext context, ServerWebExchange exchange) {
 
-		Class<?> paramType = methodParameter.getParameterType();
-		boolean isMultiValueMap = MultiValueMap.class.isAssignableFrom(paramType);
-
-		MultiValueMap<String, String> requestParams = exchange.getRequestParams().subscribe().peek();
-		Assert.notNull(requestParams, "Expected form data (if any) to be parsed.");
-
-		return Optional.of(isMultiValueMap ? requestParams : requestParams.toSingleValueMap());
+		boolean isMultiValueMap = MultiValueMap.class.isAssignableFrom(methodParameter.getParameterType());
+		MultiValueMap<String, String> queryParams = exchange.getRequest().getQueryParams();
+		return (isMultiValueMap ? queryParams : queryParams.toSingleValueMap());
 	}
 
 }

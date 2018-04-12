@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,9 @@
 
 package org.springframework.core.codec;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.OptionalLong;
 
@@ -37,6 +33,7 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.support.ResourceRegion;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
@@ -68,16 +65,15 @@ public class ResourceRegionEncoder extends AbstractEncoder<ResourceRegion> {
 	}
 
 	@Override
-	public boolean canEncode(ResolvableType elementType, MimeType mimeType) {
-
+	public boolean canEncode(ResolvableType elementType, @Nullable MimeType mimeType) {
 		return super.canEncode(elementType, mimeType)
-				&& ResourceRegion.class.isAssignableFrom(elementType.getRawClass());
+				&& ResourceRegion.class.isAssignableFrom(elementType.resolve(Object.class));
 	}
 
 	@Override
-	@SuppressWarnings("unchecked")
 	public Flux<DataBuffer> encode(Publisher<? extends ResourceRegion> inputStream,
-			DataBufferFactory bufferFactory, ResolvableType elementType, MimeType mimeType, Map<String, Object> hints) {
+			DataBufferFactory bufferFactory, ResolvableType elementType, @Nullable MimeType mimeType,
+			@Nullable Map<String, Object> hints) {
 
 		Assert.notNull(inputStream, "'inputStream' must not be null");
 		Assert.notNull(bufferFactory, "'bufferFactory' must not be null");
@@ -85,7 +81,7 @@ public class ResourceRegionEncoder extends AbstractEncoder<ResourceRegion> {
 
 		if (inputStream instanceof Mono) {
 			return ((Mono<? extends ResourceRegion>) inputStream)
-					.flatMap(region -> writeResourceRegion(region, bufferFactory));
+					.flatMapMany(region -> writeResourceRegion(region, bufferFactory));
 		}
 		else {
 			Assert.notNull(hints, "'hints' must not be null");
@@ -93,7 +89,8 @@ public class ResourceRegionEncoder extends AbstractEncoder<ResourceRegion> {
 			final String boundaryString = (String) hints.get(BOUNDARY_STRING_HINT);
 
 			byte[] startBoundary = getAsciiBytes("\r\n--" + boundaryString + "\r\n");
-			byte[] contentType = getAsciiBytes("Content-Type: " + mimeType.toString() + "\r\n");
+			byte[] contentType =
+					(mimeType != null ? getAsciiBytes("Content-Type: " + mimeType + "\r\n") : new byte[0]);
 
 			Flux<DataBuffer> regions = Flux.from(inputStream).
 					concatMap(region ->
@@ -116,32 +113,10 @@ public class ResourceRegionEncoder extends AbstractEncoder<ResourceRegion> {
 	}
 
 	private Flux<DataBuffer> writeResourceRegion(ResourceRegion region, DataBufferFactory bufferFactory) {
-		Flux<DataBuffer> in = readResourceRegion(region, bufferFactory);
-		return DataBufferUtils.takeUntilByteCount(in, region.getCount());
-	}
-
-	private Flux<DataBuffer> readResourceRegion(ResourceRegion region, DataBufferFactory bufferFactory) {
 		Resource resource = region.getResource();
-		try {
-			if (resource.isFile()) {
-				File file = region.getResource().getFile();
-				AsynchronousFileChannel channel =
-						AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-				return DataBufferUtils.read(channel, region.getPosition(),
-						bufferFactory, this.bufferSize);
-			}
-		}
-		catch (IOException ignore) {
-			// fallback to resource.readableChannel(), below
-		}
-		try {
-			ReadableByteChannel channel = resource.readableChannel();
-			Flux<DataBuffer> in = DataBufferUtils.read(channel, bufferFactory, this.bufferSize);
-			return DataBufferUtils.skipUntilByteCount(in, region.getPosition());
-		}
-		catch (IOException ex) {
-			return Flux.error(ex);
-		}
+		long position = region.getPosition();
+		Flux<DataBuffer> in = DataBufferUtils.read(resource, position, bufferFactory, this.bufferSize);
+		return DataBufferUtils.takeUntilByteCount(in, region.getCount());
 	}
 
 	private Flux<DataBuffer> getRegionSuffix(DataBufferFactory bufferFactory, String boundaryString) {

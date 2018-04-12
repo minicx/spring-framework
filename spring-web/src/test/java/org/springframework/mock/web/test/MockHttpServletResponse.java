@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
+import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -37,9 +38,11 @@ import javax.servlet.ServletOutputStream;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletResponse;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.util.Assert;
 import org.springframework.util.LinkedCaseInsensitiveMap;
+import org.springframework.util.StringUtils;
 import org.springframework.web.util.WebUtils;
 
 /**
@@ -55,12 +58,6 @@ import org.springframework.web.util.WebUtils;
 public class MockHttpServletResponse implements HttpServletResponse {
 
 	private static final String CHARSET_PREFIX = "charset=";
-
-	private static final String CONTENT_TYPE_HEADER = "Content-Type";
-
-	private static final String CONTENT_LENGTH_HEADER = "Content-Length";
-
-	private static final String LOCATION_HEADER = "Location";
 
 	private static final String DATE_FORMAT = "EEE, dd MMM yyyy HH:mm:ss zzz";
 
@@ -168,7 +165,7 @@ public class MockHttpServletResponse implements HttpServletResponse {
 			if (!this.contentType.toLowerCase().contains(CHARSET_PREFIX) && this.charset) {
 				sb.append(";").append(CHARSET_PREFIX).append(this.characterEncoding);
 			}
-			doAddHeaderValue(CONTENT_TYPE_HEADER, sb.toString(), true);
+			doAddHeaderValue(HttpHeaders.CONTENT_TYPE, sb.toString(), true);
 		}
 	}
 
@@ -195,12 +192,10 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	}
 
 	public byte[] getContentAsByteArray() {
-		flushBuffer();
 		return this.content.toByteArray();
 	}
 
 	public String getContentAsString() throws UnsupportedEncodingException {
-		flushBuffer();
 		return (this.characterEncoding != null ?
 				this.content.toString(this.characterEncoding) : this.content.toString());
 	}
@@ -208,7 +203,7 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	@Override
 	public void setContentLength(int contentLength) {
 		this.contentLength = contentLength;
-		doAddHeaderValue(CONTENT_LENGTH_HEADER, contentLength, true);
+		doAddHeaderValue(HttpHeaders.CONTENT_LENGTH, contentLength, true);
 	}
 
 	public int getContentLength() {
@@ -218,7 +213,7 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	@Override
 	public void setContentLengthLong(long contentLength) {
 		this.contentLength = contentLength;
-		doAddHeaderValue(CONTENT_LENGTH_HEADER, contentLength, true);
+		doAddHeaderValue(HttpHeaders.CONTENT_LENGTH, contentLength, true);
 	}
 
 	public long getContentLengthLong() {
@@ -296,7 +291,7 @@ public class MockHttpServletResponse implements HttpServletResponse {
 		this.characterEncoding = null;
 		this.contentLength = 0;
 		this.contentType = null;
-		this.locale = null;
+		this.locale = Locale.getDefault();
 		this.cookies.clear();
 		this.headers.clear();
 		this.status = HttpServletResponse.SC_OK;
@@ -306,6 +301,7 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	@Override
 	public void setLocale(Locale locale) {
 		this.locale = locale;
+		doAddHeaderValue(HttpHeaders.CONTENT_LANGUAGE, locale.toLanguageTag(), true);
 	}
 
 	@Override
@@ -322,10 +318,38 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	public void addCookie(Cookie cookie) {
 		Assert.notNull(cookie, "Cookie must not be null");
 		this.cookies.add(cookie);
+		doAddHeaderValue(HttpHeaders.SET_COOKIE, getCookieHeader(cookie), false);
+	}
+
+	private String getCookieHeader(Cookie cookie) {
+		StringBuilder buf = new StringBuilder();
+		buf.append(cookie.getName()).append('=').append(cookie.getValue() == null ? "" : cookie.getValue());
+		if (StringUtils.hasText(cookie.getPath())) {
+			buf.append("; Path=").append(cookie.getPath());
+		}
+		if (StringUtils.hasText(cookie.getDomain())) {
+			buf.append("; Domain=").append(cookie.getDomain());
+		}
+		int maxAge = cookie.getMaxAge();
+		if (maxAge >= 0) {
+			buf.append("; Max-Age=").append(maxAge);
+			buf.append("; Expires=");
+			HttpHeaders headers = new HttpHeaders();
+			headers.setExpires(maxAge > 0 ? System.currentTimeMillis() + 1000L * maxAge : 0);
+			buf.append(headers.getFirst(HttpHeaders.EXPIRES));
+		}
+
+		if (cookie.getSecure()) {
+			buf.append("; Secure");
+		}
+		if (cookie.isHttpOnly()) {
+			buf.append("; HttpOnly");
+		}
+		return buf.toString();
 	}
 
 	public Cookie[] getCookies() {
-		return this.cookies.toArray(new Cookie[this.cookies.size()]);
+		return this.cookies.toArray(new Cookie[0]);
 	}
 
 	public Cookie getCookie(String name) {
@@ -466,13 +490,13 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	public void sendRedirect(String url) throws IOException {
 		Assert.state(!isCommitted(), "Cannot send redirect - response is already committed");
 		Assert.notNull(url, "Redirect URL must not be null");
-		setHeader(LOCATION_HEADER, url);
+		setHeader(HttpHeaders.LOCATION, url);
 		setStatus(HttpServletResponse.SC_MOVED_TEMPORARILY);
 		setCommitted(true);
 	}
 
 	public String getRedirectedUrl() {
-		return getHeader(LOCATION_HEADER);
+		return getHeader(HttpHeaders.LOCATION);
 	}
 
 	@Override
@@ -480,27 +504,33 @@ public class MockHttpServletResponse implements HttpServletResponse {
 		setHeaderValue(name, formatDate(value));
 	}
 
-	public long getDateHeader(String name) {
-		SimpleDateFormat dateFormat = new SimpleDateFormat(DATE_FORMAT, Locale.US);
-		dateFormat.setTimeZone(GMT);
-		try {
-			return dateFormat.parse(getHeader(name)).getTime();
-		}
-		catch (ParseException ex) {
-			throw new IllegalArgumentException(
-					"Value for header '" + name + "' is not a valid Date: " + getHeader(name));
-		}
-	}
-
 	@Override
 	public void addDateHeader(String name, long value) {
 		addHeaderValue(name, formatDate(value));
 	}
 
+	public long getDateHeader(String name) {
+		String headerValue = getHeader(name);
+		if (headerValue == null) {
+			return -1;
+		}
+		try {
+			return newDateFormat().parse(getHeader(name)).getTime();
+		}
+		catch (ParseException ex) {
+			throw new IllegalArgumentException(
+					"Value for header '" + name + "' is not a valid Date: " + headerValue);
+		}
+	}
+
 	private String formatDate(long date) {
+		return newDateFormat().format(new Date(date));
+	}
+
+	private DateFormat newDateFormat() {
 		SimpleDateFormat dateFormat = new SimpleDateFormat(DATE_FORMAT, Locale.US);
 		dateFormat.setTimeZone(GMT);
-		return dateFormat.format(new Date(date));
+		return dateFormat;
 	}
 
 	@Override
@@ -538,13 +568,20 @@ public class MockHttpServletResponse implements HttpServletResponse {
 	}
 
 	private boolean setSpecialHeader(String name, Object value) {
-		if (CONTENT_TYPE_HEADER.equalsIgnoreCase(name)) {
+		if (HttpHeaders.CONTENT_TYPE.equalsIgnoreCase(name)) {
 			setContentType(value.toString());
 			return true;
 		}
-		else if (CONTENT_LENGTH_HEADER.equalsIgnoreCase(name)) {
+		else if (HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(name)) {
 			setContentLength(value instanceof Number ? ((Number) value).intValue() :
 					Integer.parseInt(value.toString()));
+			return true;
+		}
+		else if (HttpHeaders.CONTENT_LANGUAGE.equalsIgnoreCase(name)) {
+			HttpHeaders headers = new HttpHeaders();
+			headers.add(HttpHeaders.CONTENT_LANGUAGE, value.toString());
+			Locale language = headers.getContentLanguage();
+			this.locale = language != null ? language : Locale.getDefault();
 			return true;
 		}
 		else {

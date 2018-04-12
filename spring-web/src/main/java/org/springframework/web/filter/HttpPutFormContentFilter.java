@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,9 +39,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.http.converter.support.AllEncompassingFormHttpMessageConverter;
 import org.springframework.http.server.ServletServerHttpRequest;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
-import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.util.StringUtils;
 
 /**
  * {@link javax.servlet.Filter} that makes form encoded data available through
@@ -97,13 +98,15 @@ public class HttpPutFormContentFilter extends OncePerRequestFilter {
 					return request.getInputStream();
 				}
 			};
-			MultiValueMap<String, String> formParameters = formConverter.read(null, inputMessage);
-			HttpServletRequest wrapper = new HttpPutFormContentRequestWrapper(request, formParameters);
-			filterChain.doFilter(wrapper, response);
+			MultiValueMap<String, String> formParameters = this.formConverter.read(null, inputMessage);
+			if (!formParameters.isEmpty()) {
+				HttpServletRequest wrapper = new HttpPutFormContentRequestWrapper(request, formParameters);
+				filterChain.doFilter(wrapper, response);
+				return;
+			}
 		}
-		else {
-			filterChain.doFilter(request, response);
-		}
+
+		filterChain.doFilter(request, response);
 	}
 
 	private boolean isFormContentType(HttpServletRequest request) {
@@ -129,10 +132,11 @@ public class HttpPutFormContentFilter extends OncePerRequestFilter {
 
 		public HttpPutFormContentRequestWrapper(HttpServletRequest request, MultiValueMap<String, String> parameters) {
 			super(request);
-			this.formParameters = (parameters != null ? parameters : new LinkedMultiValueMap<>());
+			this.formParameters = parameters;
 		}
 
 		@Override
+		@Nullable
 		public String getParameter(String name) {
 			String queryStringValue = super.getParameter(name);
 			String formValue = this.formParameters.getFirst(name);
@@ -159,20 +163,21 @@ public class HttpPutFormContentFilter extends OncePerRequestFilter {
 		}
 
 		@Override
+		@Nullable
 		public String[] getParameterValues(String name) {
-			String[] queryStringValues = super.getParameterValues(name);
-			List<String> formValues = this.formParameters.get(name);
-			if (formValues == null) {
-				return queryStringValues;
+			String[] parameterValues = super.getParameterValues(name);
+			List<String> formParam = this.formParameters.get(name);
+			if (formParam == null) {
+				return parameterValues;
 			}
-			else if (queryStringValues == null) {
-				return formValues.toArray(new String[formValues.size()]);
+			if (parameterValues == null || getQueryString() == null) {
+				return StringUtils.toStringArray(formParam);
 			}
 			else {
-				List<String> result = new ArrayList<>(queryStringValues.length + formValues.size());
-				result.addAll(Arrays.asList(queryStringValues));
-				result.addAll(formValues);
-				return result.toArray(new String[result.size()]);
+				List<String> result = new ArrayList<>(parameterValues.length + formParam.size());
+				result.addAll(Arrays.asList(parameterValues));
+				result.addAll(formParam);
+				return StringUtils.toStringArray(result);
 			}
 		}
 	}

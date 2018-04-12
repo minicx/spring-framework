@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ package org.springframework.web.reactive.function.server;
 
 import java.net.URI;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
@@ -32,17 +34,33 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
+import org.springframework.http.codec.HttpMessageWriter;
+import org.springframework.mock.http.server.reactive.test.MockServerHttpRequest;
 import org.springframework.mock.http.server.reactive.test.MockServerHttpResponse;
-import org.springframework.web.server.ServerWebExchange;
+import org.springframework.mock.web.test.server.MockServerWebExchange;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.result.view.ViewResolver;
 
-import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
 
 /**
  * @author Arjen Poutsma
  */
 public class DefaultServerResponseBuilderTests {
+
+	static final ServerResponse.Context EMPTY_CONTEXT = new ServerResponse.Context() {
+		@Override
+		public List<HttpMessageWriter<?>> messageWriters() {
+			return Collections.emptyList();
+		}
+
+		@Override
+		public List<ViewResolver> viewResolvers() {
+			return Collections.emptyList();
+		}
+	};
 
 	@Test
 	public void from() throws Exception {
@@ -254,29 +272,46 @@ public class DefaultServerResponseBuilderTests {
 
 	@Test
 	public void headers() throws Exception {
-		HttpHeaders headers = new HttpHeaders();
-		Mono<ServerResponse> result = ServerResponse.ok().headers(headers).build();
+		HttpHeaders newHeaders = new HttpHeaders();
+		newHeaders.set("foo", "bar");
+		Mono<ServerResponse> result =
+				ServerResponse.ok().headers(headers -> headers.addAll(newHeaders)).build();
 		StepVerifier.create(result)
-				.expectNextMatches(response -> headers.equals(response.headers()))
+				.expectNextMatches(response -> newHeaders.equals(response.headers()))
 				.expectComplete()
 				.verify();
 
 	}
 
 	@Test
+	public void cookies() throws Exception {
+		MultiValueMap<String, ResponseCookie> newCookies = new LinkedMultiValueMap<>();
+		newCookies.add("name", ResponseCookie.from("name", "value").build());
+		Mono<ServerResponse> result =
+				ServerResponse.ok().cookies(cookies -> cookies.addAll(newCookies)).build();
+		StepVerifier.create(result)
+				.expectNextMatches(response -> newCookies.equals(response.cookies()))
+				.expectComplete()
+				.verify();
+	}
+
+	@Test
 	public void build() throws Exception {
+		ResponseCookie cookie = ResponseCookie.from("name", "value").build();
 		Mono<ServerResponse>
-				result = ServerResponse.status(HttpStatus.CREATED).header("MyKey", "MyValue").build();
+				result = ServerResponse.status(HttpStatus.CREATED)
+				.header("MyKey", "MyValue")
+				.cookie(cookie).build();
 
-		ServerWebExchange exchange = mock(ServerWebExchange.class);
-		MockServerHttpResponse response = new MockServerHttpResponse();
-		when(exchange.getResponse()).thenReturn(response);
-		HandlerStrategies strategies = mock(HandlerStrategies.class);
+		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com").build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
-		result.then(res -> res.writeTo(exchange, strategies)).block();
+		result.flatMap(res -> res.writeTo(exchange, EMPTY_CONTEXT)).block();
 
+		MockServerHttpResponse response = exchange.getResponse();
 		assertEquals(HttpStatus.CREATED, response.getStatusCode());
 		assertEquals("MyValue", response.getHeaders().getFirst("MyKey"));
+		assertEquals("value", response.getCookies().getFirst("name").getValue());
 		StepVerifier.create(response.getBody()).expectComplete().verify();
 	}
 
@@ -285,14 +320,68 @@ public class DefaultServerResponseBuilderTests {
 		Mono<Void> mono = Mono.empty();
 		Mono<ServerResponse> result = ServerResponse.ok().build(mono);
 
-		ServerWebExchange exchange = mock(ServerWebExchange.class);
-		MockServerHttpResponse response = new MockServerHttpResponse();
-		when(exchange.getResponse()).thenReturn(response);
-		HandlerStrategies strategies = mock(HandlerStrategies.class);
+		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com").build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
-		result.then(res -> res.writeTo(exchange, strategies)).block();
+		result.flatMap(res -> res.writeTo(exchange, EMPTY_CONTEXT)).block();
 
+		MockServerHttpResponse response = exchange.getResponse();
 		StepVerifier.create(response.getBody()).expectComplete().verify();
 	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void bodyObjectPublisher() throws Exception {
+		Mono<Void> mono = Mono.empty();
+
+		ServerResponse.ok().syncBody(mono);
+	}
+
+	@Test
+	public void notModifiedEtag() {
+		String etag = "\"foo\"";
+		ServerResponse responseMono = ServerResponse.ok()
+				.eTag(etag)
+				.syncBody("bar")
+				.block();
+
+		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com")
+				.header(HttpHeaders.IF_NONE_MATCH, etag)
+				.build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+		responseMono.writeTo(exchange, EMPTY_CONTEXT);
+
+		MockServerHttpResponse response = exchange.getResponse();
+		assertEquals(HttpStatus.NOT_MODIFIED, response.getStatusCode());
+		StepVerifier.create(response.getBody())
+				.expectError(IllegalStateException.class)
+				.verify();
+	}
+
+	@Test
+	public void notModifiedLastModified() {
+		ZonedDateTime now = ZonedDateTime.now();
+		ZonedDateTime oneMinuteBeforeNow = now.minus(1, ChronoUnit.MINUTES);
+
+		ServerResponse responseMono = ServerResponse.ok()
+				.lastModified(oneMinuteBeforeNow)
+				.syncBody("bar")
+				.block();
+
+		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com")
+				.header(HttpHeaders.IF_MODIFIED_SINCE,
+						DateTimeFormatter.RFC_1123_DATE_TIME.format(now))
+				.build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+		responseMono.writeTo(exchange, EMPTY_CONTEXT);
+
+		MockServerHttpResponse response = exchange.getResponse();
+		assertEquals(HttpStatus.NOT_MODIFIED, response.getStatusCode());
+		StepVerifier.create(response.getBody())
+				.expectError(IllegalStateException.class)
+				.verify();
+	}
+
 
 }

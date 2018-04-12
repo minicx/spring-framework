@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,10 +60,10 @@ public class ObjectUtilsTests {
 
 	@Test
 	public void isCompatibleWithThrowsClause() {
-		Class<?>[] empty = new Class[0];
-		Class<?>[] exception = new Class[] {Exception.class};
-		Class<?>[] sqlAndIO = new Class[] {SQLException.class, IOException.class};
-		Class<?>[] throwable = new Class[] {Throwable.class};
+		Class<?>[] empty = new Class<?>[0];
+		Class<?>[] exception = new Class<?>[] {Exception.class};
+		Class<?>[] sqlAndIO = new Class<?>[] {SQLException.class, IOException.class};
+		Class<?>[] throwable = new Class<?>[] {Throwable.class};
 
 		assertTrue(ObjectUtils.isCompatibleWithThrowsClause(new RuntimeException()));
 		assertTrue(ObjectUtils.isCompatibleWithThrowsClause(new RuntimeException(), empty));
@@ -102,7 +102,7 @@ public class ObjectUtilsTests {
 		assertTrue(isEmpty(new Integer[0]));
 
 		assertFalse(isEmpty(new int[] { 42 }));
-		assertFalse(isEmpty(new Integer[] { new Integer(42) }));
+		assertFalse(isEmpty(new Integer[] { 42 }));
 	}
 
 	@Test
@@ -239,18 +239,21 @@ public class ObjectUtilsTests {
 	}
 
 	@Test
+	@Deprecated
 	public void hashCodeWithBooleanFalse() {
 		int expected = Boolean.FALSE.hashCode();
 		assertEquals(expected, ObjectUtils.hashCode(false));
 	}
 
 	@Test
+	@Deprecated
 	public void hashCodeWithBooleanTrue() {
 		int expected = Boolean.TRUE.hashCode();
 		assertEquals(expected, ObjectUtils.hashCode(true));
 	}
 
 	@Test
+	@Deprecated
 	public void hashCodeWithDouble() {
 		double dbl = 9830.43;
 		int expected = (new Double(dbl)).hashCode();
@@ -258,6 +261,7 @@ public class ObjectUtilsTests {
 	}
 
 	@Test
+	@Deprecated
 	public void hashCodeWithFloat() {
 		float flt = 34.8f;
 		int expected = (new Float(flt)).hashCode();
@@ -265,6 +269,7 @@ public class ObjectUtilsTests {
 	}
 
 	@Test
+	@Deprecated
 	public void hashCodeWithLong() {
 		long lng = 883l;
 		int expected = (new Long(lng)).hashCode();
@@ -732,7 +737,7 @@ public class ObjectUtilsTests {
 
 	@Test
 	public void nullSafeToStringWithObjectArray() {
-		Object[] array = {"Han", new Long(43)};
+		Object[] array = {"Han", Long.valueOf(43)};
 		assertEquals("{Han, 43}", ObjectUtils.nullSafeToString(array));
 	}
 

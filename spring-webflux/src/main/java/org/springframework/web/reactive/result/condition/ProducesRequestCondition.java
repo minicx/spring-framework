@@ -25,12 +25,13 @@ import java.util.List;
 import java.util.Set;
 
 import org.springframework.http.MediaType;
+import org.springframework.lang.Nullable;
 import org.springframework.web.accept.ContentNegotiationManager;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.cors.reactive.CorsUtils;
-import org.springframework.web.reactive.accept.RequestedContentTypeResolverBuilder;
-import org.springframework.web.reactive.accept.RequestedContentTypeResolver;
 import org.springframework.web.reactive.accept.HeaderContentTypeResolver;
+import org.springframework.web.reactive.accept.RequestedContentTypeResolver;
+import org.springframework.web.reactive.accept.RequestedContentTypeResolverBuilder;
 import org.springframework.web.server.NotAcceptableStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -46,10 +47,10 @@ import org.springframework.web.server.ServerWebExchange;
  */
 public final class ProducesRequestCondition extends AbstractRequestCondition<ProducesRequestCondition> {
 
-	private final static ProducesRequestCondition PRE_FLIGHT_MATCH = new ProducesRequestCondition();
+	private static final ProducesRequestCondition PRE_FLIGHT_MATCH = new ProducesRequestCondition();
 
 
-	private final List<ProduceMediaTypeExpression> MEDIA_TYPE_ALL_LIST =
+	private final List<ProduceMediaTypeExpression> mediaTypeAllList =
 			Collections.singletonList(new ProduceMediaTypeExpression("*/*"));
 
 	private final List<ProduceMediaTypeExpression> expressions;
@@ -99,8 +100,7 @@ public final class ProducesRequestCondition extends AbstractRequestCondition<Pro
 
 		this.expressions = new ArrayList<>(expressions);
 		Collections.sort(this.expressions);
-		this.contentTypeResolver = (resolver != null ?
-				resolver : new RequestedContentTypeResolverBuilder().build());
+		this.contentTypeResolver = (resolver != null ? resolver : new RequestedContentTypeResolverBuilder().build());
 	}
 
 
@@ -147,6 +147,7 @@ public final class ProducesRequestCondition extends AbstractRequestCondition<Pro
 	/**
 	 * Whether the condition has any media type expressions.
 	 */
+	@Override
 	public boolean isEmpty() {
 		return this.expressions.isEmpty();
 	}
@@ -182,6 +183,7 @@ public final class ProducesRequestCondition extends AbstractRequestCondition<Pro
 	 * or {@code null} if no expressions match.
 	 */
 	@Override
+	@Nullable
 	public ProducesRequestCondition getMatchingCondition(ServerWebExchange exchange) {
 		if (CorsUtils.isPreFlightRequest(exchange.getRequest())) {
 			return PRE_FLIGHT_MATCH;
@@ -290,7 +292,7 @@ public final class ProducesRequestCondition extends AbstractRequestCondition<Pro
 	 * with a {@code MediaType_ALL} expression.
 	 */
 	private List<ProduceMediaTypeExpression> getExpressionsToCompare() {
-		return (this.expressions.isEmpty() ? MEDIA_TYPE_ALL_LIST : this.expressions);
+		return (this.expressions.isEmpty() ? mediaTypeAllList  : this.expressions);
 	}
 
 

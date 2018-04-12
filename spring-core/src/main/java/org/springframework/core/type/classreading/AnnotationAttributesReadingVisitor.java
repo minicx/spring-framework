@@ -25,6 +25,7 @@ import java.util.Set;
 
 import org.springframework.core.annotation.AnnotationAttributes;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.lang.Nullable;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.ObjectUtils;
 
@@ -51,7 +52,7 @@ final class AnnotationAttributesReadingVisitor extends RecursiveAnnotationAttrib
 
 	public AnnotationAttributesReadingVisitor(String annotationType,
 			MultiValueMap<String, AnnotationAttributes> attributesMap, Map<String, Set<String>> metaAnnotationMap,
-			ClassLoader classLoader) {
+			@Nullable ClassLoader classLoader) {
 
 		super(annotationType, new AnnotationAttributes(annotationType, classLoader), classLoader);
 		this.attributesMap = attributesMap;
@@ -81,28 +82,27 @@ final class AnnotationAttributesReadingVisitor extends RecursiveAnnotationAttrib
 					}
 				}
 			}
-			if (this.metaAnnotationMap != null) {
-				Set<String> metaAnnotationTypeNames = new LinkedHashSet<>(visited.size());
-				for (Annotation ann : visited) {
-					metaAnnotationTypeNames.add(ann.annotationType().getName());
-				}
-				this.metaAnnotationMap.put(annotationClass.getName(), metaAnnotationTypeNames);
+			Set<String> metaAnnotationTypeNames = new LinkedHashSet<>(visited.size());
+			for (Annotation ann : visited) {
+				metaAnnotationTypeNames.add(ann.annotationType().getName());
 			}
+			this.metaAnnotationMap.put(annotationClass.getName(), metaAnnotationTypeNames);
 		}
 	}
 
 	private void recursivelyCollectMetaAnnotations(Set<Annotation> visited, Annotation annotation) {
-		if (!AnnotationUtils.isInJavaLangAnnotationPackage(annotation) && visited.add(annotation)) {
+		Class<? extends Annotation> annotationType = annotation.annotationType();
+		String annotationName = annotationType.getName();
+		if (!AnnotationUtils.isInJavaLangAnnotationPackage(annotationName) && visited.add(annotation)) {
 			try {
 				// Only do attribute scanning for public annotations; we'd run into
 				// IllegalAccessExceptions otherwise, and we don't want to mess with
 				// accessibility in a SecurityManager environment.
-				if (Modifier.isPublic(annotation.annotationType().getModifiers())) {
-					String annotationName = annotation.annotationType().getName();
+				if (Modifier.isPublic(annotationType.getModifiers())) {
 					this.attributesMap.add(annotationName,
 							AnnotationUtils.getAnnotationAttributes(annotation, false, true));
 				}
-				for (Annotation metaMetaAnnotation : annotation.annotationType().getAnnotations()) {
+				for (Annotation metaMetaAnnotation : annotationType.getAnnotations()) {
 					recursivelyCollectMetaAnnotations(visited, metaMetaAnnotation);
 				}
 			}

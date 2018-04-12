@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import javax.servlet.ServletRequest;
 import javax.servlet.ServletRequestWrapper;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.websocket.CloseReason;
 
 import org.glassfish.tyrus.core.TyrusUpgradeResponse;
 import org.glassfish.tyrus.core.Utils;
@@ -38,6 +37,7 @@ import org.glassfish.tyrus.spi.Writer;
 
 import org.springframework.beans.BeanWrapper;
 import org.springframework.beans.BeanWrapperImpl;
+import org.springframework.lang.Nullable;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.web.socket.server.HandshakeFailureException;
 
@@ -55,11 +55,7 @@ public class WebLogicRequestUpgradeStrategy extends AbstractTyrusRequestUpgradeS
 
 	private static final WebLogicServletWriterHelper servletWriterHelper = new WebLogicServletWriterHelper();
 
-	private static final Connection.CloseListener noOpCloseListener = new Connection.CloseListener() {
-		@Override
-		public void close(CloseReason reason) {
-		}
-	};
+	private static final Connection.CloseListener noOpCloseListener = (reason -> {});
 
 
 	@Override
@@ -142,7 +138,7 @@ public class WebLogicRequestUpgradeStrategy extends AbstractTyrusRequestUpgradeS
 			}
 		}
 
-		private Object newInstance(HttpServletRequest request, Object httpSocket) {
+		private Object newInstance(HttpServletRequest request, @Nullable Object httpSocket) {
 			try {
 				Object[] args = new Object[] {httpSocket, null, subjectHelper.getSubject(request)};
 				return constructor.newInstance(args);
@@ -152,7 +148,7 @@ public class WebLogicRequestUpgradeStrategy extends AbstractTyrusRequestUpgradeS
 			}
 		}
 
-		private void upgrade(Object webSocket, Object httpSocket, ServletContext servletContext) {
+		private void upgrade(Object webSocket, @Nullable Object httpSocket, ServletContext servletContext) {
 			try {
 				upgradeMethod.invoke(webSocket, httpSocket, servletContext);
 			}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 package org.springframework.web.reactive.result.view;
 
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -31,6 +30,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -62,6 +62,7 @@ public class RedirectView extends AbstractUrlBasedView {
 
 	private boolean propagateQuery = false;
 
+	@Nullable
 	private String[] hosts;
 
 
@@ -112,8 +113,7 @@ public class RedirectView extends AbstractUrlBasedView {
 	 * {@link HttpStatus#PERMANENT_REDIRECT}.
 	 */
 	public void setStatusCode(HttpStatus statusCode) {
-		Assert.notNull(statusCode, "HttpStatus must not be null");
-		Assert.isTrue(statusCode.is3xxRedirection(), "Must be a redirection (3xx status code)");
+		Assert.isTrue(statusCode.is3xxRedirection(), "Not a redirect status code");
 		this.statusCode = statusCode;
 	}
 
@@ -142,19 +142,19 @@ public class RedirectView extends AbstractUrlBasedView {
 	/**
 	 * Configure one or more hosts associated with the application.
 	 * All other hosts will be considered external hosts.
-	 * <p>In effect this provides a way turn off encoding via
-	 * {@link ServerHttpResponse#encodeUrl(String)} for URLs that have a
-	 * host and that host is not listed as a known host.
+	 * <p>In effect this provides a way turn off encoding for URLs that
+	 * have a host and that host is not listed as a known host.
 	 * <p>If not set (the default) all redirect URLs are encoded.
 	 * @param hosts one or more application hosts
 	 */
-	public void setHosts(String... hosts) {
+	public void setHosts(@Nullable String... hosts) {
 		this.hosts = hosts;
 	}
 
 	/**
 	 * Return the configured application hosts.
 	 */
+	@Nullable
 	public String[] getHosts() {
 		return this.hosts;
 	}
@@ -163,11 +163,13 @@ public class RedirectView extends AbstractUrlBasedView {
 	@Override
 	public void afterPropertiesSet() throws Exception {
 		super.afterPropertiesSet();
-		if (getStatusCode() == null) {
-			throw new IllegalArgumentException("Property 'statusCode' is required");
-		}
 	}
 
+
+	@Override
+	public boolean isRedirectView() {
+		return true;
+	}
 
 	@Override
 	public boolean checkResourceExists(Locale locale) throws Exception {
@@ -178,8 +180,8 @@ public class RedirectView extends AbstractUrlBasedView {
 	 * Convert model to request parameters and redirect to the given URL.
 	 */
 	@Override
-	protected Mono<Void> renderInternal(Map<String, Object> model, MediaType contentType,
-			ServerWebExchange exchange) {
+	protected Mono<Void> renderInternal(
+			Map<String, Object> model, @Nullable MediaType contentType, ServerWebExchange exchange) {
 
 		String targetUrl = createTargetUrl(model, exchange);
 		return sendRedirect(targetUrl, exchange);
@@ -192,12 +194,16 @@ public class RedirectView extends AbstractUrlBasedView {
 	 * RequestDataValueProcessor}.
 	 */
 	protected final String createTargetUrl(Map<String, Object> model, ServerWebExchange exchange) {
+		String url = getUrl();
+		Assert.state(url != null, "'url' not set");
+
+		ServerHttpRequest request = exchange.getRequest();
 
 		StringBuilder targetUrl = new StringBuilder();
-		if (isContextRelative() && getUrl().startsWith("/")) {
-			targetUrl.append(exchange.getRequest().getContextPath());
+		if (isContextRelative() && url.startsWith("/")) {
+			targetUrl.append(request.getPath().contextPath().value());
 		}
-		targetUrl.append(getUrl());
+		targetUrl.append(url);
 
 		if (StringUtils.hasText(targetUrl)) {
 			Map<String, String> uriVars = getCurrentUriVariables(exchange);
@@ -205,7 +211,7 @@ public class RedirectView extends AbstractUrlBasedView {
 		}
 
 		if (isPropagateQuery()) {
-			targetUrl = appendCurrentRequestQuery(targetUrl.toString(), exchange.getRequest());
+			targetUrl = appendCurrentRequestQuery(targetUrl.toString(), request);
 		}
 
 		String result = targetUrl.toString();
@@ -217,7 +223,7 @@ public class RedirectView extends AbstractUrlBasedView {
 	@SuppressWarnings("unchecked")
 	private Map<String, String> getCurrentUriVariables(ServerWebExchange exchange) {
 		String name = HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE;
-		return (Map<String, String>) exchange.getAttribute(name).orElse(Collections.emptyMap());
+		return exchange.getAttributeOrDefault(name, Collections.<String, String>emptyMap());
 	}
 
 	/**
@@ -249,14 +255,8 @@ public class RedirectView extends AbstractUrlBasedView {
 	}
 
 	private String encodeUriVariable(String text) {
-		try {
-			// Strict encoding of all reserved URI characters
-			return UriUtils.encode(text, StandardCharsets.UTF_8.name());
-		}
-		catch (UnsupportedEncodingException ex) {
-			// Should never happen...
-			throw new IllegalStateException(ex);
-		}
+		// Strict encoding of all reserved URI characters
+		return UriUtils.encode(text, StandardCharsets.UTF_8);
 	}
 
 	/**
@@ -268,7 +268,7 @@ public class RedirectView extends AbstractUrlBasedView {
 			return new StringBuilder(targetUrl);
 		}
 
-		int index = targetUrl.indexOf("#");
+		int index = targetUrl.indexOf('#');
 		String fragment = (index > -1 ? targetUrl.substring(index) : null);
 
 		StringBuilder result = new StringBuilder();
@@ -288,9 +288,9 @@ public class RedirectView extends AbstractUrlBasedView {
 	 * @param exchange current exchange
 	 */
 	protected Mono<Void> sendRedirect(String targetUrl, ServerWebExchange exchange) {
+		String transformedUrl = (isRemoteHost(targetUrl) ? targetUrl : exchange.transformUrl(targetUrl));
 		ServerHttpResponse response = exchange.getResponse();
-		String encodedURL = (isRemoteHost(targetUrl) ? targetUrl : response.encodeUrl(targetUrl));
-		response.getHeaders().setLocation(URI.create(encodedURL));
+		response.getHeaders().setLocation(URI.create(transformedUrl));
 		response.setStatusCode(getStatusCode());
 		return Mono.empty();
 	}

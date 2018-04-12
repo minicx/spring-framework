@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,20 +21,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.function.Function;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.reactive.ClientHttpResponse;
 import org.springframework.http.codec.HttpMessageReader;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyExtractor;
 import org.springframework.web.reactive.function.BodyExtractors;
@@ -43,6 +43,7 @@ import org.springframework.web.reactive.function.BodyExtractors;
  * Default implementation of {@link ClientResponse}.
  *
  * @author Arjen Poutsma
+ * @author Brian Clozel
  * @since 5.0
  */
 class DefaultClientResponse implements ClientResponse {
@@ -60,6 +61,10 @@ class DefaultClientResponse implements ClientResponse {
 		this.headers = new DefaultHeaders();
 	}
 
+	@Override
+	public ExchangeStrategies strategies() {
+		return this.strategies;
+	}
 
 	@Override
 	public HttpStatus statusCode() {
@@ -80,9 +85,15 @@ class DefaultClientResponse implements ClientResponse {
 	public <T> T body(BodyExtractor<T, ? super ClientHttpResponse> extractor) {
 		return extractor.extract(this.response, new BodyExtractor.Context() {
 			@Override
-			public Supplier<Stream<HttpMessageReader<?>>> messageReaders() {
+			public List<HttpMessageReader<?>> messageReaders() {
 				return strategies.messageReaders();
 			}
+
+			@Override
+			public Optional<ServerHttpResponse> serverResponse() {
+				return Optional.empty();
+			}
+
 			@Override
 			public Map<String, Object> hints() {
 				return Collections.emptyMap();
@@ -92,29 +103,101 @@ class DefaultClientResponse implements ClientResponse {
 
 	@Override
 	public <T> Mono<T> bodyToMono(Class<? extends T> elementClass) {
-		return bodyToPublisher(BodyExtractors.toMono(elementClass), Mono::error);
+		if (Void.class.isAssignableFrom(elementClass)) {
+			return consumeAndCancel();
+		}
+		else {
+			return body(BodyExtractors.toMono(elementClass));
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private <T> Mono<T> consumeAndCancel() {
+		return (Mono<T>) this.response.getBody()
+				.map(buffer -> {
+					DataBufferUtils.release(buffer);
+					throw new ReadCancellationException();
+				})
+				.onErrorResume(ReadCancellationException.class, ex -> Mono.empty())
+				.then();
+	}
+
+	@Override
+	public <T> Mono<T> bodyToMono(ParameterizedTypeReference<T> typeReference) {
+		if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
+			return consumeAndCancel();
+		}
+		else {
+			return body(BodyExtractors.toMono(typeReference));
+		}
 	}
 
 	@Override
 	public <T> Flux<T> bodyToFlux(Class<? extends T> elementClass) {
-		return bodyToPublisher(BodyExtractors.toFlux(elementClass), Flux::error);
-	}
-
-
-	private <T extends Publisher<?>> T bodyToPublisher(
-			BodyExtractor<T, ? super ClientHttpResponse> extractor,
-			Function<WebClientException, T> errorFunction) {
-
-		HttpStatus status = statusCode();
-		if (status.is4xxClientError() || status.is5xxServerError()) {
-			WebClientException ex = new WebClientException(
-					"ClientResponse has erroneous status code: " + status.value() +
-							" " + status.getReasonPhrase());
-			return errorFunction.apply(ex);
+		if (Void.class.isAssignableFrom(elementClass)) {
+			return Flux.from(consumeAndCancel());
 		}
 		else {
-			return body(extractor);
+			return body(BodyExtractors.toFlux(elementClass));
 		}
+	}
+
+	@Override
+	public <T> Flux<T> bodyToFlux(ParameterizedTypeReference<T> typeReference) {
+		if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
+			return Flux.from(consumeAndCancel());
+		}
+		else {
+			return body(BodyExtractors.toFlux(typeReference));
+		}
+	}
+
+	@Override
+	public <T> Mono<ResponseEntity<T>> toEntity(Class<T> bodyType) {
+		if (Void.class.isAssignableFrom(bodyType)) {
+			return toEntityInternal(consumeAndCancel());
+		}
+		else {
+			return toEntityInternal(bodyToMono(bodyType));
+		}
+	}
+
+	@Override
+	public <T> Mono<ResponseEntity<T>> toEntity(ParameterizedTypeReference<T> typeReference) {
+		if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
+			return toEntityInternal(consumeAndCancel());
+		}
+		else {
+			return toEntityInternal(bodyToMono(typeReference));
+		}
+	}
+
+	private <T> Mono<ResponseEntity<T>> toEntityInternal(Mono<T> bodyMono) {
+		HttpHeaders headers = headers().asHttpHeaders();
+		HttpStatus statusCode = statusCode();
+		return bodyMono
+				.map(body -> new ResponseEntity<>(body, headers, statusCode))
+				.switchIfEmpty(Mono.defer(
+						() -> Mono.just(new ResponseEntity<>(headers, statusCode))));
+	}
+
+	@Override
+	public <T> Mono<ResponseEntity<List<T>>> toEntityList(Class<T> responseType) {
+		return toEntityListInternal(bodyToFlux(responseType));
+	}
+
+	@Override
+	public <T> Mono<ResponseEntity<List<T>>> toEntityList(
+			ParameterizedTypeReference<T> typeReference) {
+		return toEntityListInternal(bodyToFlux(typeReference));
+	}
+
+	private <T> Mono<ResponseEntity<List<T>>> toEntityListInternal(Flux<T> bodyFlux) {
+		HttpHeaders headers = headers().asHttpHeaders();
+		HttpStatus statusCode = statusCode();
+		return bodyFlux
+				.collectList()
+				.map(body -> new ResponseEntity<>(body, headers, statusCode));
 	}
 
 
@@ -149,5 +232,9 @@ class DefaultClientResponse implements ClientResponse {
 			return value != -1 ? OptionalLong.of(value) : OptionalLong.empty();
 		}
 
+	}
+
+	@SuppressWarnings("serial")
+	private class ReadCancellationException extends RuntimeException {
 	}
 }

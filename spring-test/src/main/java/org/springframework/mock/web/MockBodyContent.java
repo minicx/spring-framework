@@ -24,6 +24,8 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.jsp.JspWriter;
 import javax.servlet.jsp.tagext.BodyContent;
 
+import org.springframework.lang.Nullable;
+
 /**
  * Mock implementation of the {@link javax.servlet.jsp.tagext.BodyContent} class.
  * Only necessary for testing applications when testing custom JSP tags.
@@ -60,12 +62,12 @@ public class MockBodyContent extends BodyContent {
 	 * @param response the servlet response to wrap
 	 * @param targetWriter the target Writer to wrap
 	 */
-	public MockBodyContent(String content, HttpServletResponse response, Writer targetWriter) {
+	public MockBodyContent(String content, @Nullable HttpServletResponse response, @Nullable Writer targetWriter) {
 		super(adaptJspWriter(targetWriter, response));
 		this.content = content;
 	}
 
-	private static JspWriter adaptJspWriter(Writer targetWriter, HttpServletResponse response) {
+	private static JspWriter adaptJspWriter(@Nullable Writer targetWriter, @Nullable HttpServletResponse response) {
 		if (targetWriter instanceof JspWriter) {
 			return (JspWriter) targetWriter;
 		}
@@ -121,7 +123,7 @@ public class MockBodyContent extends BodyContent {
 	}
 
 	@Override
-	public void write(char value[], int offset, int length) throws IOException {
+	public void write(char[] value, int offset, int length) throws IOException {
 		getEnclosingWriter().write(value, offset, length);
 	}
 

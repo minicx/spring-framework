@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.springframework.web.server.session;
 
 import java.time.Duration;
@@ -24,7 +25,6 @@ import org.springframework.http.HttpCookie;
 import org.springframework.http.ResponseCookie;
 import org.springframework.util.Assert;
 import org.springframework.util.MultiValueMap;
-import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
 
 /**
@@ -46,7 +46,7 @@ public class CookieWebSessionIdResolver implements WebSessionIdResolver {
 	 * @param cookieName the cookie name
 	 */
 	public void setCookieName(String cookieName) {
-		Assert.hasText(cookieName, "'cookieName' must not be empty.");
+		Assert.hasText(cookieName, "'cookieName' must not be empty");
 		this.cookieName = cookieName;
 	}
 
@@ -87,10 +87,22 @@ public class CookieWebSessionIdResolver implements WebSessionIdResolver {
 
 	@Override
 	public void setSessionId(ServerWebExchange exchange, String id) {
-		Duration maxAge = (StringUtils.hasText(id) ? getCookieMaxAge() : Duration.ofSeconds(0));
-		ResponseCookie cookie = ResponseCookie.from(getCookieName(), id).maxAge(maxAge).build();
-		MultiValueMap<String, ResponseCookie> cookieMap = exchange.getResponse().getCookies();
-		cookieMap.set(getCookieName(), cookie);
+		Assert.notNull(id, "'id' is required");
+		setSessionCookie(exchange, id, getCookieMaxAge());
+	}
+
+	@Override
+	public void expireSession(ServerWebExchange exchange) {
+		setSessionCookie(exchange, "", Duration.ofSeconds(0));
+	}
+
+	private void setSessionCookie(ServerWebExchange exchange, String id, Duration maxAge) {
+		String name = getCookieName();
+		boolean secure = "https".equalsIgnoreCase(exchange.getRequest().getURI().getScheme());
+		String path = exchange.getRequest().getPath().contextPath().value() + "/";
+		exchange.getResponse().getCookies().set(name,
+				ResponseCookie.from(name, id).path(path)
+						.maxAge(maxAge).httpOnly(true).secure(secure).build());
 	}
 
 }

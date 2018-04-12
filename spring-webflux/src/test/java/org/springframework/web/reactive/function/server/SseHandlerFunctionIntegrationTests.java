@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,12 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import static org.junit.Assert.*;
-import static org.springframework.core.ResolvableType.*;
 import static org.springframework.http.MediaType.*;
 import static org.springframework.web.reactive.function.BodyExtractors.*;
 import static org.springframework.web.reactive.function.BodyInserters.*;
@@ -58,12 +59,12 @@ public class SseHandlerFunctionIntegrationTests extends AbstractRouterFunctionIn
 
 
 	@Test
-	public void sseAsString() throws Exception {
+	public void sseAsString() {
 		Flux<String> result = this.webClient.get()
 				.uri("/string")
 				.accept(TEXT_EVENT_STREAM)
 				.exchange()
-				.flatMap(response -> response.body(toFlux(String.class)));
+				.flatMapMany(response -> response.body(toFlux(String.class)));
 
 		StepVerifier.create(result)
 				.expectNext("foo 0")
@@ -73,12 +74,12 @@ public class SseHandlerFunctionIntegrationTests extends AbstractRouterFunctionIn
 	}
 
 	@Test
-	public void sseAsPerson() throws Exception {
+	public void sseAsPerson() {
 		Flux<Person> result = this.webClient.get()
 				.uri("/person")
 				.accept(TEXT_EVENT_STREAM)
 				.exchange()
-				.flatMap(response -> response.body(toFlux(Person.class)));
+				.flatMapMany(response -> response.body(toFlux(Person.class)));
 
 		StepVerifier.create(result)
 				.expectNext(new Person("foo 0"))
@@ -88,28 +89,28 @@ public class SseHandlerFunctionIntegrationTests extends AbstractRouterFunctionIn
 	}
 
 	@Test
-	public void sseAsEvent() throws Exception {
+	public void sseAsEvent() {
 		Flux<ServerSentEvent<String>> result = this.webClient.get()
 				.uri("/event")
 				.accept(TEXT_EVENT_STREAM)
 				.exchange()
-				.flatMap(response -> response.body(toFlux(
-						forClassWithGenerics(ServerSentEvent.class, String.class))));
+				.flatMapMany(response -> response.body(toFlux(
+						new ParameterizedTypeReference<ServerSentEvent<String>>() {})));
 
 		StepVerifier.create(result)
 				.consumeNextWith( event -> {
-					assertEquals("0", event.id().get());
-					assertEquals("foo", event.data().get());
-					assertEquals("bar", event.comment().get());
-					assertFalse(event.event().isPresent());
-					assertFalse(event.retry().isPresent());
+					assertEquals("0", event.id());
+					assertEquals("foo", event.data());
+					assertEquals("bar", event.comment());
+					assertNull(event.event());
+					assertNull(event.retry());
 				})
 				.consumeNextWith( event -> {
-					assertEquals("1", event.id().get());
-					assertEquals("foo", event.data().get());
-					assertEquals("bar", event.comment().get());
-					assertFalse(event.event().isPresent());
-					assertFalse(event.retry().isPresent());
+					assertEquals("1", event.id());
+					assertEquals("foo", event.data());
+					assertEquals("bar", event.comment());
+					assertNull(event.event());
+					assertNull(event.retry());
 				})
 				.expectComplete()
 				.verify(Duration.ofSeconds(5L));
@@ -118,24 +119,25 @@ public class SseHandlerFunctionIntegrationTests extends AbstractRouterFunctionIn
 
 	private static class SseHandler {
 
-		public Mono<ServerResponse> string(ServerRequest request) {
-			Flux<String> flux = Flux.interval(Duration.ofMillis(100)).map(l -> "foo " + l).take(2);
-			return ServerResponse.ok().body(fromServerSentEvents(flux, String.class));
+		private static final Flux<Long> INTERVAL = interval(Duration.ofMillis(100), 2);
+
+
+		Mono<ServerResponse> string(ServerRequest request) {
+			return ServerResponse.ok()
+					.contentType(MediaType.TEXT_EVENT_STREAM)
+					.body(INTERVAL.map(aLong -> "foo " + aLong), String.class);
 		}
 
-		public Mono<ServerResponse> person(ServerRequest request) {
-			Flux<Person> flux = Flux.interval(Duration.ofMillis(100))
-					.map(l -> new Person("foo " + l)).take(2);
-			return ServerResponse.ok().body(fromServerSentEvents(flux, Person.class));
+		Mono<ServerResponse> person(ServerRequest request) {
+			return ServerResponse.ok()
+					.contentType(MediaType.TEXT_EVENT_STREAM)
+					.body(INTERVAL.map(aLong -> new Person("foo " + aLong)), Person.class);
 		}
 
-		public Mono<ServerResponse> sse(ServerRequest request) {
-			Flux<ServerSentEvent<String>> flux = Flux.interval(Duration.ofMillis(100))
-					.map(l -> ServerSentEvent.<String>builder().data("foo")
-							.id(Long.toString(l))
-							.comment("bar")
-							.build()).take(2);
-			return ServerResponse.ok().body(fromServerSentEvents(flux));
+		Mono<ServerResponse> sse(ServerRequest request) {
+			Flux<ServerSentEvent<String>> body = INTERVAL
+					.map(aLong -> ServerSentEvent.builder("foo").id("" + aLong).comment("bar").build());
+			return ServerResponse.ok().body(fromServerSentEvents(body));
 		}
 	}
 

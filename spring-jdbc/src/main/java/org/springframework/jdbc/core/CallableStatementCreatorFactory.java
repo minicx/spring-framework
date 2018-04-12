@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.lang.Nullable;
 
 /**
  * Helper class that efficiently creates multiple {@link CallableStatementCreator}
@@ -52,6 +53,7 @@ public class CallableStatementCreatorFactory {
 	/**
 	 * Create a new factory. Will need to add parameters via the
 	 * {@link #addParameter} method or have no parameters.
+	 * @param callString the SQL call string
 	 */
 	public CallableStatementCreatorFactory(String callString) {
 		this.callString = callString;
@@ -102,7 +104,7 @@ public class CallableStatementCreatorFactory {
 	 * Return a new CallableStatementCreator instance given this parameters.
 	 * @param params list of parameters (may be {@code null})
 	 */
-	public CallableStatementCreator newCallableStatementCreator(Map<String, ?> params) {
+	public CallableStatementCreator newCallableStatementCreator(@Nullable Map<String, ?> params) {
 		return new CallableStatementCreatorImpl(params != null ? params : new HashMap<>());
 	}
 
@@ -120,8 +122,10 @@ public class CallableStatementCreatorFactory {
 	 */
 	private class CallableStatementCreatorImpl implements CallableStatementCreator, SqlProvider, ParameterDisposer {
 
+		@Nullable
 		private ParameterMapper inParameterMapper;
 
+		@Nullable
 		private Map<String, ?> inParameters;
 
 		/**

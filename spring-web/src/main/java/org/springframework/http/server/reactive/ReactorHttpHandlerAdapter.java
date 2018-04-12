@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,26 +16,28 @@
 
 package org.springframework.http.server.reactive;
 
+import java.net.URISyntaxException;
 import java.util.function.BiFunction;
 
 import io.netty.handler.codec.http.HttpResponseStatus;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import reactor.core.publisher.Mono;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.springframework.core.io.buffer.NettyDataBufferFactory;
+import org.springframework.http.HttpMethod;
 import org.springframework.util.Assert;
 
 /**
  * Adapt {@link HttpHandler} to the Reactor Netty channel handling function.
  *
  * @author Stephane Maldini
+ * @author Rossen Stoyanchev
  * @since 5.0
  */
-public class ReactorHttpHandlerAdapter
-		implements BiFunction<HttpServerRequest, HttpServerResponse, Mono<Void>> {
+public class ReactorHttpHandlerAdapter implements BiFunction<HttpServerRequest, HttpServerResponse, Mono<Void>> {
 
 	private static final Log logger = LogFactory.getLog(ReactorHttpHandlerAdapter.class);
 
@@ -51,18 +53,28 @@ public class ReactorHttpHandlerAdapter
 
 	@Override
 	public Mono<Void> apply(HttpServerRequest request, HttpServerResponse response) {
-
 		NettyDataBufferFactory bufferFactory = new NettyDataBufferFactory(response.alloc());
-		ReactorServerHttpRequest req = new ReactorServerHttpRequest(request, bufferFactory);
-		ReactorServerHttpResponse resp = new ReactorServerHttpResponse(response, bufferFactory);
+		ServerHttpRequest adaptedRequest;
+		ServerHttpResponse adaptedResponse;
+		try {
+			adaptedRequest = new ReactorServerHttpRequest(request, bufferFactory);
+			adaptedResponse = new ReactorServerHttpResponse(response, bufferFactory);
+		}
+		catch (URISyntaxException ex) {
+			if (logger.isWarnEnabled()) {
+				logger.warn("Invalid URL for incoming request: " + ex.getMessage());
+			}
+			response.status(HttpResponseStatus.BAD_REQUEST);
+			return Mono.empty();
+		}
 
-		return this.httpHandler.handle(req, resp)
-				.otherwise(ex -> {
-					logger.error("Could not complete request", ex);
-					response.status(HttpResponseStatus.INTERNAL_SERVER_ERROR);
-					return Mono.empty();
-				})
-				.doOnSuccess(aVoid -> logger.debug("Successfully completed request"));
+		if (adaptedRequest.getMethod() == HttpMethod.HEAD) {
+			adaptedResponse = new HttpHeadResponseDecorator(adaptedResponse);
+		}
+
+		return this.httpHandler.handle(adaptedRequest, adaptedResponse)
+				.doOnError(ex -> logger.error("Handling completed with error", ex))
+				.doOnSuccess(aVoid -> logger.debug("Handling completed with success"));
 	}
 
 }

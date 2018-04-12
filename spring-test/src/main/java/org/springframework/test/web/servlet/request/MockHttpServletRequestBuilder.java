@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ package org.springframework.test.web.servlet.request;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
@@ -29,10 +28,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Map.Entry;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletRequest;
 import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpSession;
 
 import org.springframework.beans.Mergeable;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
@@ -41,6 +40,7 @@ import org.springframework.http.HttpInputMessage;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.FormHttpMessageConverter;
+import org.springframework.lang.Nullable;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
@@ -49,6 +49,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.ObjectUtils;
+import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
@@ -58,16 +59,18 @@ import org.springframework.web.servlet.FlashMapManager;
 import org.springframework.web.servlet.support.SessionFlashMapManager;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
+import org.springframework.web.util.UrlPathHelper;
 
 /**
- * Default builder for {@link MockHttpServletRequest} required as input to perform
- * requests in {@link MockMvc}.
+ * Default builder for {@link MockHttpServletRequest} required as input to
+ * perform requests in {@link MockMvc}.
  *
- * <p>Application tests will typically access this builder through the static factory
- * methods in {@link MockMvcRequestBuilders}.
+ * <p>Application tests will typically access this builder through the static
+ * factory methods in {@link MockMvcRequestBuilders}.
  *
- * <p>Although this class cannot be extended, additional ways to initialize the
- * {@code MockHttpServletRequest} can be plugged in via {@link #with(RequestPostProcessor)}.
+ * <p>This class is not open for extension. To apply custom initialization to
+ * the created {@code MockHttpServletRequest}, please use the
+ * {@link #with(RequestPostProcessor)} extension point.
  *
  * @author Rossen Stoyanchev
  * @author Juergen Hoeller
@@ -79,6 +82,9 @@ import org.springframework.web.util.UriUtils;
 public class MockHttpServletRequestBuilder
 		implements ConfigurableSmartRequestBuilder<MockHttpServletRequestBuilder>, Mergeable {
 
+	private static final UrlPathHelper urlPathHelper = new UrlPathHelper();
+
+
 	private final String method;
 
 	private final URI url;
@@ -87,18 +93,25 @@ public class MockHttpServletRequestBuilder
 
 	private String servletPath = "";
 
+	@Nullable
 	private String pathInfo = "";
 
+	@Nullable
 	private Boolean secure;
 
+	@Nullable
 	private Principal principal;
 
+	@Nullable
 	private MockHttpSession session;
 
+	@Nullable
 	private String characterEncoding;
 
+	@Nullable
 	private byte[] content;
 
+	@Nullable
 	private String contentType;
 
 	private final MultiValueMap<String, Object> headers = new LinkedMultiValueMap<>();
@@ -171,7 +184,7 @@ public class MockHttpServletRequestBuilder
 			Assert.isTrue(contextPath.startsWith("/"), "Context path must start with a '/'");
 			Assert.isTrue(!contextPath.endsWith("/"), "Context path must not end with a '/'");
 		}
-		this.contextPath = (contextPath != null ? contextPath : "");
+		this.contextPath = contextPath;
 		return this;
 	}
 
@@ -193,7 +206,7 @@ public class MockHttpServletRequestBuilder
 			Assert.isTrue(servletPath.startsWith("/"), "Servlet path must start with a '/'");
 			Assert.isTrue(!servletPath.endsWith("/"), "Servlet path must not end with a '/'");
 		}
-		this.servletPath = (servletPath != null ? servletPath : "");
+		this.servletPath = servletPath;
 		return this;
 	}
 
@@ -205,7 +218,7 @@ public class MockHttpServletRequestBuilder
 	 * <p>If specified, the pathInfo will be used as-is.
 	 * @see javax.servlet.http.HttpServletRequest#getPathInfo()
 	 */
-	public MockHttpServletRequestBuilder pathInfo(String pathInfo) {
+	public MockHttpServletRequestBuilder pathInfo(@Nullable String pathInfo) {
 		if (StringUtils.hasText(pathInfo)) {
 			Assert.isTrue(pathInfo.startsWith("/"), "Path info must start with a '/'");
 		}
@@ -286,7 +299,7 @@ public class MockHttpServletRequestBuilder
 	 */
 	public MockHttpServletRequestBuilder accept(String... mediaTypes) {
 		Assert.notEmpty(mediaTypes, "'mediaTypes' must not be empty");
-		List<MediaType> result = new ArrayList<MediaType>(mediaTypes.length);
+		List<MediaType> result = new ArrayList<>(mediaTypes.length);
 		for (String mediaType : mediaTypes) {
 			result.add(MediaType.parseMediaType(mediaType));
 		}
@@ -309,10 +322,7 @@ public class MockHttpServletRequestBuilder
 	 * @param httpHeaders the headers and values to add
 	 */
 	public MockHttpServletRequestBuilder headers(HttpHeaders httpHeaders) {
-		for (String name : httpHeaders.keySet()) {
-			Object[] values = ObjectUtils.toObjectArray(httpHeaders.get(name).toArray());
-			addToMultiValueMap(this.headers, name, values);
-		}
+		httpHeaders.forEach(this.headers::addAll);
 		return this;
 	}
 
@@ -370,7 +380,7 @@ public class MockHttpServletRequestBuilder
 	 * @param locale the locale, or {@code null} to reset it
 	 * @see #locale(Locale...)
 	 */
-	public MockHttpServletRequestBuilder locale(Locale locale) {
+	public MockHttpServletRequestBuilder locale(@Nullable Locale locale) {
 		this.locales.clear();
 		if (locale != null) {
 			this.locales.add(locale);
@@ -485,7 +495,7 @@ public class MockHttpServletRequestBuilder
 	 * @return the result of the merge
 	 */
 	@Override
-	public Object merge(Object parent) {
+	public Object merge(@Nullable Object parent) {
 		if (parent == null) {
 			return this;
 		}
@@ -642,7 +652,7 @@ public class MockHttpServletRequestBuilder
 		}
 
 		if (!ObjectUtils.isEmpty(this.cookies)) {
-			request.setCookies(this.cookies.toArray(new Cookie[this.cookies.size()]));
+			request.setCookies(this.cookies.toArray(new Cookie[0]));
 		}
 		if (!ObjectUtils.isEmpty(this.locales)) {
 			request.setPreferredLocales(this.locales);
@@ -652,7 +662,9 @@ public class MockHttpServletRequestBuilder
 			request.setAttribute(name, this.requestAttributes.get(name));
 		}
 		for (String name : this.sessionAttributes.keySet()) {
-			request.getSession().setAttribute(name, this.sessionAttributes.get(name));
+			HttpSession session = request.getSession();
+			Assert.state(session != null, "No HttpSession");
+			session.setAttribute(name, this.sessionAttributes.get(name));
 		}
 
 		FlashMap flashMap = new FlashMap();
@@ -689,30 +701,24 @@ public class MockHttpServletRequestBuilder
 						"Invalid servlet path [" + this.servletPath + "] for request URI [" + requestUri + "]");
 			}
 			String extraPath = requestUri.substring(this.contextPath.length() + this.servletPath.length());
-			this.pathInfo = (StringUtils.hasText(extraPath) ? extraPath : null);
+			this.pathInfo = (StringUtils.hasText(extraPath) ?
+					urlPathHelper.decodeRequestString(request, extraPath) : null);
 		}
 		request.setPathInfo(this.pathInfo);
 	}
 
 	private void addRequestParams(MockHttpServletRequest request, MultiValueMap<String, String> map) {
-		try {
-			for (Entry<String, List<String>> entry : map.entrySet()) {
-				for (String value : entry.getValue()) {
-					value = (value != null) ? UriUtils.decode(value, "UTF-8") : null;
-					request.addParameter(UriUtils.decode(entry.getKey(), "UTF-8"), value);
-				}
-			}
-		}
-		catch (UnsupportedEncodingException ex) {
-			// shouldn't happen
-		}
+		map.forEach((key, values) -> values.forEach(value -> {
+			value = (value != null ? UriUtils.decode(value, StandardCharsets.UTF_8) : null);
+			request.addParameter(UriUtils.decode(key, StandardCharsets.UTF_8), value);
+		}));
 	}
 
 	private MultiValueMap<String, String> parseFormData(final MediaType mediaType) {
 		HttpInputMessage message = new HttpInputMessage() {
 			@Override
-			public InputStream getBody() throws IOException {
-				return new ByteArrayInputStream(content);
+			public InputStream getBody() {
+				return (content != null ? new ByteArrayInputStream(content) : StreamUtils.emptyInput());
 			}
 			@Override
 			public HttpHeaders getHeaders() {
@@ -737,10 +743,7 @@ public class MockHttpServletRequestBuilder
 			WebApplicationContext wac = WebApplicationContextUtils.getRequiredWebApplicationContext(servletContext);
 			flashMapManager = wac.getBean(DispatcherServlet.FLASH_MAP_MANAGER_BEAN_NAME, FlashMapManager.class);
 		}
-		catch (IllegalStateException ex) {
-			// ignore
-		}
-		catch (NoSuchBeanDefinitionException ex) {
+		catch (IllegalStateException | NoSuchBeanDefinitionException ex) {
 			// ignore
 		}
 		return (flashMapManager != null ? flashMapManager : new SessionFlashMapManager());
@@ -750,8 +753,6 @@ public class MockHttpServletRequestBuilder
 	public MockHttpServletRequest postProcessRequest(MockHttpServletRequest request) {
 		for (RequestPostProcessor postProcessor : this.postProcessors) {
 			request = postProcessor.postProcessRequest(request);
-			Assert.state(request != null,
-					() -> "Post-processor [" + postProcessor.getClass().getName() + "] returned null");
 		}
 		return request;
 	}

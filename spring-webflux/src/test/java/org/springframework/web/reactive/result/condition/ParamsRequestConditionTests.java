@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2012 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,7 @@ import java.util.Collection;
 
 import org.junit.Test;
 
-import org.springframework.http.MediaType;
-import org.springframework.mock.http.server.reactive.test.MockServerHttpRequest;
-import org.springframework.mock.http.server.reactive.test.MockServerWebExchange;
+import org.springframework.mock.web.test.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
 
 import static org.junit.Assert.assertEquals;
@@ -50,44 +48,42 @@ public class ParamsRequestConditionTests {
 	@Test
 	public void paramPresent() throws Exception {
 		ParamsRequestCondition condition = new ParamsRequestCondition("foo");
+		assertNotNull(condition.getMatchingCondition(MockServerWebExchange.from(get("/path?foo="))));
+	}
 
-		assertNotNull(condition.getMatchingCondition(get("/path?foo=").toExchange()));
-		assertNotNull(condition.getMatchingCondition(postForm("foo=")));
+	@Test // SPR-15831
+	public void paramPresentNullValue() throws Exception {
+		ParamsRequestCondition condition = new ParamsRequestCondition("foo");
+		assertNotNull(condition.getMatchingCondition(MockServerWebExchange.from(get("/path?foo"))));
 	}
 
 	@Test
 	public void paramPresentNoMatch() throws Exception {
 		ParamsRequestCondition condition = new ParamsRequestCondition("foo");
-
-		assertNull(condition.getMatchingCondition(get("/path?bar=").toExchange()));
-		assertNull(condition.getMatchingCondition(postForm("bar=")));
+		assertNull(condition.getMatchingCondition(MockServerWebExchange.from(get("/path?bar="))));
 	}
 
 	@Test
 	public void paramNotPresent() throws Exception {
-		MockServerWebExchange exchange = get("/").toExchange();
+		MockServerWebExchange exchange = MockServerWebExchange.from(get("/"));
 		assertNotNull(new ParamsRequestCondition("!foo").getMatchingCondition(exchange));
 	}
 
 	@Test
 	public void paramValueMatch() throws Exception {
 		ParamsRequestCondition condition = new ParamsRequestCondition("foo=bar");
-
-		assertNotNull(condition.getMatchingCondition(get("/path?foo=bar").toExchange()));
-		assertNotNull(condition.getMatchingCondition(postForm("foo=bar")));
+		assertNotNull(condition.getMatchingCondition(MockServerWebExchange.from(get("/path?foo=bar"))));
 	}
 
 	@Test
 	public void paramValueNoMatch() throws Exception {
 		ParamsRequestCondition condition = new ParamsRequestCondition("foo=bar");
-
-		assertNull(condition.getMatchingCondition(get("/path?foo=bazz").toExchange()));
-		assertNull(condition.getMatchingCondition(postForm("foo=bazz")));
+		assertNull(condition.getMatchingCondition(MockServerWebExchange.from(get("/path?foo=bazz"))));
 	}
 
 	@Test
 	public void compareTo() throws Exception {
-		ServerWebExchange exchange = get("/").toExchange();
+		ServerWebExchange exchange = MockServerWebExchange.from(get("/"));
 
 		ParamsRequestCondition condition1 = new ParamsRequestCondition("foo", "bar", "baz");
 		ParamsRequestCondition condition2 = new ParamsRequestCondition("foo", "bar");
@@ -107,14 +103,6 @@ public class ParamsRequestConditionTests {
 		ParamsRequestCondition result = condition1.combine(condition2);
 		Collection<?> conditions = result.getContent();
 		assertEquals(2, conditions.size());
-	}
-
-
-	private static MockServerWebExchange postForm(String formData) {
-		return MockServerHttpRequest.post("/")
-				.contentType(MediaType.APPLICATION_FORM_URLENCODED)
-				.body(formData)
-				.toExchange();
 	}
 
 }

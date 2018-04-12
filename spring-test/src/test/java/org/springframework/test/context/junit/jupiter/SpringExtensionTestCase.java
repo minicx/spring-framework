@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,8 +42,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Integration tests which demonstrate that the Spring TestContext Framework can
  * be used with JUnit Jupiter via the {@link SpringExtension}.
  *
- * <p>To run these tests in an IDE, simply run {@link SpringJUnitJupiterTestSuite}
- * as a JUnit 4 test.
+ * <p>To run these tests in an IDE that does not have built-in support for the JUnit
+ * Platform, simply run {@link SpringJUnitJupiterTestSuite} as a JUnit 4 test.
  *
  * @author Sam Brannen
  * @since 5.0
@@ -99,7 +99,7 @@ class SpringExtensionTestCase {
 		assertEquals(2, this.cats.size(), "Number of cats in context");
 
 		assertNotNull(this.enigma, "Enigma should have been injected via @Value by Spring");
-		assertEquals(new Integer(42), this.enigma, "enigma");
+		assertEquals(Integer.valueOf(42), this.enigma, "enigma");
 	}
 
 	@Test
@@ -163,7 +163,7 @@ class SpringExtensionTestCase {
 	@Test
 	void valueParameterFromPropertyPlaceholder(@Value("${enigma}") Integer enigmaParam) {
 		assertNotNull(enigmaParam, "Enigma should have been injected via @Value by Spring");
-		assertEquals(new Integer(42), enigmaParam, "enigma");
+		assertEquals(Integer.valueOf(42), enigmaParam, "enigma");
 	}
 
 	@Test

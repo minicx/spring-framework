@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanNameAware;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.NoUniqueBeanDefinitionException;
@@ -150,6 +151,35 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		assertEquals(2, depBeans.length);
 		assertEquals("testBean", depBeans[0]);
 		assertEquals("nestedTestBean", depBeans[1]);
+	}
+
+	@Test
+	public void testExtendedResourceInjectionWithDestruction() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.registerResolvableDependency(BeanFactory.class, bf);
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(TypedExtendedResourceInjectionBean.class));
+		bf.registerBeanDefinition("testBean", new RootBeanDefinition(TestBean.class));
+		NestedTestBean ntb = new NestedTestBean();
+		bf.registerSingleton("nestedTestBean", ntb);
+
+		TestBean tb = bf.getBean("testBean", TestBean.class);
+		TypedExtendedResourceInjectionBean bean = (TypedExtendedResourceInjectionBean) bf.getBean("annotatedBean");
+		assertSame(tb, bean.getTestBean());
+		assertSame(tb, bean.getTestBean2());
+		assertSame(tb, bean.getTestBean3());
+		assertSame(tb, bean.getTestBean4());
+		assertSame(ntb, bean.getNestedTestBean());
+		assertSame(bf, bean.getBeanFactory());
+
+		assertArrayEquals(new String[] {"testBean", "nestedTestBean"}, bf.getDependenciesForBean("annotatedBean"));
+		bf.destroySingleton("testBean");
+		assertFalse(bf.containsSingleton("testBean"));
+		assertFalse(bf.containsSingleton("annotatedBean"));
+		assertTrue(bean.destroyed);
+		assertSame(0, bf.getDependenciesForBean("annotatedBean").length);
 	}
 
 	@Test
@@ -572,8 +602,9 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 	}
 
 	@Test
-	public void testConstructorResourceInjectionWithNull() {
+	public void testConstructorResourceInjectionWithNullFromFactoryBean() {
 		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setAutowireCandidateResolver(new QualifierAnnotationAutowireCandidateResolver());
 		bf.registerResolvableDependency(BeanFactory.class, bf);
 		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
 		bpp.setBeanFactory(bf);
@@ -599,6 +630,42 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		assertSame(tb, bean.getTestBean2());
 		assertSame(tb, bean.getTestBean3());
 		assertSame(tb, bean.getTestBean4());
+		assertNull(bean.getNestedTestBean());
+		assertSame(bf, bean.getBeanFactory());
+	}
+
+	@Test
+	public void testConstructorResourceInjectionWithNullFromFactoryMethod() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setAutowireCandidateResolver(new QualifierAnnotationAutowireCandidateResolver());
+		bf.registerResolvableDependency(BeanFactory.class, bf);
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		RootBeanDefinition bd = new RootBeanDefinition(ConstructorResourceInjectionBean.class);
+		bd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
+		bf.registerBeanDefinition("annotatedBean", bd);
+		RootBeanDefinition tb = new RootBeanDefinition(NullFactoryMethods.class);
+		tb.setFactoryMethodName("createTestBean");
+		bf.registerBeanDefinition("testBean", tb);
+		RootBeanDefinition ntb = new RootBeanDefinition(NullFactoryMethods.class);
+		ntb.setFactoryMethodName("createNestedTestBean");
+		bf.registerBeanDefinition("nestedTestBean", ntb);
+		bf.registerSingleton("nestedTestBean2", new NestedTestBean());
+
+		ConstructorResourceInjectionBean bean = (ConstructorResourceInjectionBean) bf.getBean("annotatedBean");
+		assertNull(bean.getTestBean());
+		assertNull(bean.getTestBean2());
+		assertNull(bean.getTestBean3());
+		assertNull(bean.getTestBean4());
+		assertNull(bean.getNestedTestBean());
+		assertSame(bf, bean.getBeanFactory());
+
+		bean = (ConstructorResourceInjectionBean) bf.getBean("annotatedBean");
+		assertNull(bean.getTestBean());
+		assertNull(bean.getTestBean2());
+		assertNull(bean.getTestBean3());
+		assertNull(bean.getTestBean4());
 		assertNull(bean.getNestedTestBean());
 		assertSame(bf, bean.getBeanFactory());
 	}
@@ -642,6 +709,34 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 			// expected
 			assertSame(ConstructorWithoutFallbackBean.class, ex.getInjectionPoint().getMethodParameter().getDeclaringClass());
 		}
+	}
+
+	@Test
+	public void testConstructorResourceInjectionWithCollectionAndNullFromFactoryBean() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(
+				ConstructorsCollectionResourceInjectionBean.class));
+		TestBean tb = new TestBean();
+		bf.registerSingleton("testBean", tb);
+		bf.registerBeanDefinition("nestedTestBean1", new RootBeanDefinition(NullNestedTestBeanFactoryBean.class));
+		NestedTestBean ntb2 = new NestedTestBean();
+		bf.registerSingleton("nestedTestBean2", ntb2);
+
+		ConstructorsCollectionResourceInjectionBean bean = (ConstructorsCollectionResourceInjectionBean) bf.getBean("annotatedBean");
+		assertNull(bean.getTestBean3());
+		assertSame(tb, bean.getTestBean4());
+		assertEquals(2, bean.getNestedTestBeans().size());
+		assertNull(bean.getNestedTestBeans().get(0));
+		assertSame(ntb2, bean.getNestedTestBeans().get(1));
+
+		Map<String, NestedTestBean> map = bf.getBeansOfType(NestedTestBean.class);
+		assertNull(map.get("nestedTestBean1"));
+		assertSame(ntb2, map.get("nestedTestBean2"));
+
+		bf.destroySingletons();
 	}
 
 	@Test
@@ -699,8 +794,7 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
 		bpp.setBeanFactory(bf);
 		bf.addBeanPostProcessor(bpp);
-		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(
-				ConstructorsCollectionResourceInjectionBean.class));
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(ConstructorsCollectionResourceInjectionBean.class));
 		TestBean tb = new TestBean();
 		bf.registerSingleton("testBean", tb);
 		FixedOrder2NestedTestBean ntb1 = new FixedOrder2NestedTestBean();
@@ -715,6 +809,73 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		assertSame(ntb2, bean.getNestedTestBeans().get(0));
 		assertSame(ntb1, bean.getNestedTestBeans().get(1));
 		bf.destroySingletons();
+	}
+
+	@Test
+	public void testSingleConstructorInjectionWithMultipleCandidatesAsOrderedCollection() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setDependencyComparator(AnnotationAwareOrderComparator.INSTANCE);
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(SingleConstructorCollectionInjectionBean.class));
+		TestBean tb = new TestBean();
+		bf.registerSingleton("testBean", tb);
+		FixedOrder2NestedTestBean ntb1 = new FixedOrder2NestedTestBean();
+		bf.registerSingleton("nestedTestBean1", ntb1);
+		FixedOrder1NestedTestBean ntb2 = new FixedOrder1NestedTestBean();
+		bf.registerSingleton("nestedTestBean2", ntb2);
+
+		SingleConstructorCollectionInjectionBean bean = (SingleConstructorCollectionInjectionBean) bf.getBean("annotatedBean");
+		assertSame(tb, bean.getTestBean());
+		assertEquals(2, bean.getNestedTestBeans().size());
+		assertSame(ntb2, bean.getNestedTestBeans().get(0));
+		assertSame(ntb1, bean.getNestedTestBeans().get(1));
+		bf.destroySingletons();
+	}
+
+	@Test
+	public void testSingleConstructorInjectionWithEmptyCollection() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setAutowireCandidateResolver(new QualifierAnnotationAutowireCandidateResolver());
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(SingleConstructorCollectionInjectionBean.class));
+		TestBean tb = new TestBean();
+		bf.registerSingleton("testBean", tb);
+
+		SingleConstructorCollectionInjectionBean bean = (SingleConstructorCollectionInjectionBean) bf.getBean("annotatedBean");
+		assertSame(tb, bean.getTestBean());
+		assertNull(bean.getNestedTestBeans());
+		bf.destroySingletons();
+	}
+
+	@Test(expected = UnsatisfiedDependencyException.class)
+	public void testSingleConstructorInjectionWithMissingDependency() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setAutowireCandidateResolver(new QualifierAnnotationAutowireCandidateResolver());
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(SingleConstructorCollectionInjectionBean.class));
+
+		bf.getBean("annotatedBean");
+	}
+
+	@Test(expected = UnsatisfiedDependencyException.class)
+	public void testSingleConstructorInjectionWithNullDependency() {
+		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
+		bf.setAutowireCandidateResolver(new QualifierAnnotationAutowireCandidateResolver());
+		AutowiredAnnotationBeanPostProcessor bpp = new AutowiredAnnotationBeanPostProcessor();
+		bpp.setBeanFactory(bf);
+		bf.addBeanPostProcessor(bpp);
+		bf.registerBeanDefinition("annotatedBean", new RootBeanDefinition(SingleConstructorCollectionInjectionBean.class));
+		RootBeanDefinition tb = new RootBeanDefinition(NullFactoryMethods.class);
+		tb.setFactoryMethodName("createTestBean");
+		bf.registerBeanDefinition("testBean", tb);
+
+		bf.getBean("annotatedBean");
 	}
 
 	@Test
@@ -757,23 +918,20 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		bd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
 		bf.registerBeanDefinition("annotatedBean", bd);
 		TestBean tb1 = new TestBean("tb1");
-		TestBean tb2 = new TestBean("tb2");
 		bf.registerSingleton("testBean1", tb1);
-		bf.registerSingleton("testBean2", tb2);
+		RootBeanDefinition tb2 = new RootBeanDefinition(NullFactoryMethods.class);
+		tb2.setFactoryMethodName("createTestBean");
+		bf.registerBeanDefinition("testBean2", tb2);
 
 		MapConstructorInjectionBean bean = (MapConstructorInjectionBean) bf.getBean("annotatedBean");
 		assertEquals(2, bean.getTestBeanMap().size());
-		assertTrue(bean.getTestBeanMap().keySet().contains("testBean1"));
-		assertTrue(bean.getTestBeanMap().keySet().contains("testBean2"));
-		assertTrue(bean.getTestBeanMap().values().contains(tb1));
-		assertTrue(bean.getTestBeanMap().values().contains(tb2));
+		assertSame(tb1, bean.getTestBeanMap().get("testBean1"));
+		assertNull(bean.getTestBeanMap().get("testBean2"));
 
 		bean = (MapConstructorInjectionBean) bf.getBean("annotatedBean");
 		assertEquals(2, bean.getTestBeanMap().size());
-		assertTrue(bean.getTestBeanMap().keySet().contains("testBean1"));
-		assertTrue(bean.getTestBeanMap().keySet().contains("testBean2"));
-		assertTrue(bean.getTestBeanMap().values().contains(tb1));
-		assertTrue(bean.getTestBeanMap().values().contains(tb2));
+		assertSame(tb1, bean.getTestBeanMap().get("testBean1"));
+		assertNull(bean.getTestBeanMap().get("testBean2"));
 	}
 
 	@Test
@@ -1158,9 +1316,6 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		bf.destroySingletons();
 	}
 
-	@Qualifier("testBean")
-	private void testBeanQualifierProvider() {}
-
 	@Test
 	public void testObjectFactorySerialization() throws Exception {
 		DefaultListableBeanFactory bf = new DefaultListableBeanFactory();
@@ -1194,8 +1349,10 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		assertEquals(bf.getBean("testBean", "myName"), bean.getTestBean("myName"));
 		assertEquals(bf.getBean("testBean"), bean.getOptionalTestBean());
 		assertEquals(bf.getBean("testBean"), bean.getOptionalTestBeanWithDefault());
+		assertEquals(bf.getBean("testBean"), bean.consumeOptionalTestBean());
 		assertEquals(bf.getBean("testBean"), bean.getUniqueTestBean());
 		assertEquals(bf.getBean("testBean"), bean.getUniqueTestBeanWithDefault());
+		assertEquals(bf.getBean("testBean"), bean.consumeUniqueTestBean());
 		bf.destroySingletons();
 	}
 
@@ -1212,8 +1369,10 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		assertSame(bf.getBean("testBean"), bean.getTestBean());
 		assertSame(bf.getBean("testBean"), bean.getOptionalTestBean());
 		assertSame(bf.getBean("testBean"), bean.getOptionalTestBeanWithDefault());
+		assertEquals(bf.getBean("testBean"), bean.consumeOptionalTestBean());
 		assertSame(bf.getBean("testBean"), bean.getUniqueTestBean());
 		assertSame(bf.getBean("testBean"), bean.getUniqueTestBeanWithDefault());
+		assertEquals(bf.getBean("testBean"), bean.consumeUniqueTestBean());
 		bf.destroySingletons();
 	}
 
@@ -1234,9 +1393,11 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 			// expected
 		}
 		assertNull(bean.getOptionalTestBean());
+		assertNull(bean.consumeOptionalTestBean());
 		assertEquals(new TestBean("default"), bean.getOptionalTestBeanWithDefault());
 		assertEquals(new TestBean("default"), bean.getUniqueTestBeanWithDefault());
 		assertNull(bean.getUniqueTestBean());
+		assertNull(bean.consumeUniqueTestBean());
 		bf.destroySingletons();
 	}
 
@@ -1265,7 +1426,15 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		catch (NoUniqueBeanDefinitionException ex) {
 			// expected
 		}
+		try {
+			bean.consumeOptionalTestBean();
+			fail("Should have thrown NoUniqueBeanDefinitionException");
+		}
+		catch (NoUniqueBeanDefinitionException ex) {
+			// expected
+		}
 		assertNull(bean.getUniqueTestBean());
+		assertNull(bean.consumeUniqueTestBean());
 		bf.destroySingletons();
 	}
 
@@ -1286,7 +1455,9 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		SmartObjectFactoryInjectionBean bean = (SmartObjectFactoryInjectionBean) bf.getBean("annotatedBean");
 		assertSame(bf.getBean("testBean1"), bean.getTestBean());
 		assertSame(bf.getBean("testBean1"), bean.getOptionalTestBean());
+		assertSame(bf.getBean("testBean1"), bean.consumeOptionalTestBean());
 		assertSame(bf.getBean("testBean1"), bean.getUniqueTestBean());
+		assertSame(bf.getBean("testBean1"), bean.consumeUniqueTestBean());
 		assertFalse(bf.containsSingleton("testBean2"));
 		bf.destroySingletons();
 	}
@@ -2350,6 +2521,9 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 	}
 
 
+	@Qualifier("testBean")
+	private void testBeanQualifierProvider() {}
+
 	@Qualifier("integerRepo")
 	private Repository<?> integerRepositoryQualifierProvider;
 
@@ -2435,7 +2609,15 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 	}
 
 
-	public static class TypedExtendedResourceInjectionBean extends NonPublicResourceInjectionBean<NestedTestBean> {
+	public static class TypedExtendedResourceInjectionBean extends NonPublicResourceInjectionBean<NestedTestBean>
+			implements DisposableBean {
+
+		public boolean destroyed = false;
+
+		@Override
+		public void destroy() {
+			this.destroyed = true;
+		}
 	}
 
 
@@ -2595,7 +2777,7 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 
 	public static class ConstructorResourceInjectionBean extends ResourceInjectionBean {
 
-		@Autowired
+		@Autowired(required = false)
 		protected ITestBean testBean3;
 
 		private ITestBean testBean4;
@@ -2603,7 +2785,6 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		private NestedTestBean nestedTestBean;
 
 		private ConfigurableListableBeanFactory beanFactory;
-
 
 		public ConstructorResourceInjectionBean() {
 			throw new UnsupportedOperationException();
@@ -2614,7 +2795,8 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		}
 
 		@Autowired
-		public ConstructorResourceInjectionBean(ITestBean testBean4, NestedTestBean nestedTestBean,
+		public ConstructorResourceInjectionBean(@Autowired(required = false) ITestBean testBean4,
+				@Autowired(required = false) NestedTestBean nestedTestBean,
 				ConfigurableListableBeanFactory beanFactory) {
 			this.testBean4 = testBean4;
 			this.nestedTestBean = nestedTestBean;
@@ -2630,7 +2812,7 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		}
 
 		@Override
-		@Autowired
+		@Autowired(required = false)
 		public void setTestBean2(TestBean testBean2) {
 			super.setTestBean2(testBean2);
 		}
@@ -2749,6 +2931,28 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 
 		public ITestBean getTestBean4() {
 			return this.testBean4;
+		}
+
+		public List<NestedTestBean> getNestedTestBeans() {
+			return this.nestedTestBeans;
+		}
+	}
+
+
+	public static class SingleConstructorCollectionInjectionBean {
+
+		private ITestBean testBean;
+
+		private List<NestedTestBean> nestedTestBeans;
+
+		public SingleConstructorCollectionInjectionBean(ITestBean testBean,
+				@Autowired(required = false) List<NestedTestBean> nestedTestBeans) {
+			this.testBean = testBean;
+			this.nestedTestBeans = nestedTestBeans;
+		}
+
+		public ITestBean getTestBean() {
+			return this.testBean;
 		}
 
 		public List<NestedTestBean> getNestedTestBeans() {
@@ -2895,6 +3099,8 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		@Autowired
 		private ObjectProvider<TestBean> testBeanFactory;
 
+		private TestBean consumedTestBean;
+
 		public TestBean getTestBean() {
 			return this.testBeanFactory.getObject();
 		}
@@ -2911,12 +3117,22 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 			return this.testBeanFactory.getIfAvailable(() -> new TestBean("default"));
 		}
 
+		public TestBean consumeOptionalTestBean() {
+			this.testBeanFactory.ifAvailable(tb -> consumedTestBean = tb);
+			return consumedTestBean;
+		}
+
 		public TestBean getUniqueTestBean() {
 			return this.testBeanFactory.getIfUnique();
 		}
 
 		public TestBean getUniqueTestBeanWithDefault() {
 			return this.testBeanFactory.getIfUnique(() -> new TestBean("default"));
+		}
+
+		public TestBean consumeUniqueTestBean() {
+			this.testBeanFactory.ifUnique(tb -> consumedTestBean = tb);
+			return consumedTestBean;
 		}
 	}
 
@@ -3737,6 +3953,18 @@ public class AutowiredAnnotationBeanPostProcessorTests {
 		@Override
 		public boolean isSingleton() {
 			return true;
+		}
+	}
+
+
+	public static class NullFactoryMethods {
+
+		public static TestBean createTestBean() {
+			return null;
+		}
+
+		public static NestedTestBean createNestedTestBean() {
+			return null;
 		}
 	}
 

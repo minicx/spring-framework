@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ import org.junit.Test;
 
 import org.springframework.beans.propertyeditors.CustomNumberEditor;
 import org.springframework.beans.propertyeditors.StringTrimmerEditor;
-import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.tests.sample.beans.GenericBean;
 import org.springframework.tests.sample.beans.GenericIntegerBean;
@@ -519,7 +518,7 @@ public class BeanWrapperGenericsTests {
 		assertEquals("y", bw.getPropertyValue("data['x']"));
 
 		bw.setPropertyValue("data['message']", "it works!");
-		assertEquals(data.get("message"), "it works!");
+		assertEquals("it works!", data.get("message"));
 	}
 
 

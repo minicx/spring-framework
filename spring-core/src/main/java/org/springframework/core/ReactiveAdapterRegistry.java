@@ -16,6 +16,7 @@
 
 package org.springframework.core;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -23,14 +24,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import io.reactivex.BackpressureStrategy;
+import io.reactivex.Flowable;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import rx.RxReactiveStreams;
 
+import org.springframework.lang.Nullable;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.ReflectionUtils;
 
-import static org.springframework.core.ReactiveTypeDescriptor.*;
+import static org.springframework.core.ReactiveTypeDescriptor.multiValue;
+import static org.springframework.core.ReactiveTypeDescriptor.noValue;
+import static org.springframework.core.ReactiveTypeDescriptor.singleOptionalValue;
+import static org.springframework.core.ReactiveTypeDescriptor.singleRequiredValue;
 
 /**
  * A registry of adapters to adapt a Reactive Streams {@link Publisher} to/from
@@ -38,7 +45,8 @@ import static org.springframework.core.ReactiveTypeDescriptor.*;
  * {@code Observable}, and others.
  *
  * <p>By default, depending on classpath availability, adapters are registered
- * for Reactor, RxJava 1, RxJava 2 types, and {@link CompletableFuture}.
+ * for Reactor, RxJava 1, RxJava 2 types, {@link CompletableFuture}, and Java 9+
+ * Flow.Publisher.
  *
  * @author Rossen Stoyanchev
  * @author Sebastien Deleuze
@@ -46,18 +54,10 @@ import static org.springframework.core.ReactiveTypeDescriptor.*;
  */
 public class ReactiveAdapterRegistry {
 
-	private static final boolean reactorPresent =
-			ClassUtils.isPresent("reactor.core.publisher.Flux", ReactiveAdapterRegistry.class.getClassLoader());
+	@Nullable
+	private static volatile ReactiveAdapterRegistry sharedInstance;
 
-	private static final boolean rxJava1Present =
-			ClassUtils.isPresent("rx.Observable", ReactiveAdapterRegistry.class.getClassLoader());
-
-	private static final boolean rxJava1Adapter =
-			ClassUtils.isPresent("rx.RxReactiveStreams", ReactiveAdapterRegistry.class.getClassLoader());
-
-	private static final boolean rxJava2Present =
-			ClassUtils.isPresent("io.reactivex.Flowable", ReactiveAdapterRegistry.class.getClassLoader());
-
+	private final boolean reactorPresent;
 
 	private final List<ReactiveAdapter> adapters = new ArrayList<>(32);
 
@@ -66,17 +66,53 @@ public class ReactiveAdapterRegistry {
 	 * Create a registry and auto-register default adapters.
 	 */
 	public ReactiveAdapterRegistry() {
-		if (reactorPresent) {
+
+		// Reactor
+		boolean reactorRegistered = false;
+		try {
 			new ReactorRegistrar().registerAdapters(this);
+			reactorRegistered = true;
 		}
-		if (rxJava1Present && rxJava1Adapter) {
+		catch (Throwable ex) {
+			// Ignore
+		}
+		this.reactorPresent = reactorRegistered;
+
+		// RxJava1
+		try {
 			new RxJava1Registrar().registerAdapters(this);
 		}
-		if (rxJava2Present) {
+		catch (Throwable ex) {
+			// Ignore
+		}
+
+		// RxJava2
+		try {
 			new RxJava2Registrar().registerAdapters(this);
+		}
+		catch (Throwable ex) {
+			// Ignore
+		}
+
+		// Java 9+ Flow.Publisher
+		try {
+			new ReactorJdkFlowAdapterRegistrar().registerAdapter(this);
+		}
+		catch (Throwable ex) {
+			// Ignore for the time being...
+			// We can fall back on "reactive-streams-flow-bridge" (once released)
 		}
 	}
 
+
+	/**
+	 * Whether the registry has any adapters which would be the case if any of
+	 * Reactor, RxJava 2, or RxJava 1 (+ RxJava Reactive Streams bridge) are
+	 * present on the classpath.
+	 */
+	public boolean hasAdapters() {
+		return !this.adapters.isEmpty();
+	}
 
 	/**
 	 * Register a reactive type along with functions to adapt to and from a
@@ -97,6 +133,7 @@ public class ReactiveAdapterRegistry {
 	/**
 	 * Get the adapter for the given reactive type.
 	 */
+	@Nullable
 	public ReactiveAdapter getAdapter(Class<?> reactiveType) {
 		return getAdapter(reactiveType, null);
 	}
@@ -109,9 +146,13 @@ public class ReactiveAdapterRegistry {
 	 * @param source an instance of the reactive type
 	 * (i.e. to adapt from; may be {@code null} if the reactive type is specified)
 	 */
-	public ReactiveAdapter getAdapter(Class<?> reactiveType, Object source) {
+	@Nullable
+	public ReactiveAdapter getAdapter(@Nullable Class<?> reactiveType, @Nullable Object source) {
 		Object sourceToUse = (source instanceof Optional ? ((Optional<?>) source).orElse(null) : source);
 		Class<?> clazz = (sourceToUse != null ? sourceToUse.getClass() : reactiveType);
+		if (clazz == null) {
+			return null;
+		}
 
 		return this.adapters.stream()
 				.filter(adapter -> adapter.getReactiveType() == clazz)
@@ -121,6 +162,31 @@ public class ReactiveAdapterRegistry {
 								.filter(adapter -> adapter.getReactiveType().isAssignableFrom(clazz))
 								.findFirst()
 								.orElse(null));
+	}
+
+
+	/**
+	 * Return a shared default {@code ReactiveAdapterRegistry} instance, lazily
+	 * building it once needed.
+	 * <p><b>NOTE:</b> We highly recommend passing a long-lived, pre-configured
+	 * {@code ReactiveAdapterRegistry} instance for customization purposes.
+	 * This accessor is only meant as a fallback for code paths that want to
+	 * fall back on a default instance if one isn't provided.
+	 * @return the shared {@code ReactiveAdapterRegistry} instance (never {@code null})
+	 * @since 5.0.2
+	 */
+	public static ReactiveAdapterRegistry getSharedInstance() {
+		ReactiveAdapterRegistry ar = sharedInstance;
+		if (ar == null) {
+			synchronized (ReactiveAdapterRegistry.class) {
+				ar = sharedInstance;
+				if (ar == null) {
+					ar = new ReactiveAdapterRegistry();
+					sharedInstance = ar;
+				}
+			}
+		}
+		return ar;
 	}
 
 
@@ -184,7 +250,7 @@ public class ReactiveAdapterRegistry {
 			registry.registerReactiveType(
 					multiValue(io.reactivex.Flowable.class, io.reactivex.Flowable::empty),
 					source -> (io.reactivex.Flowable<?>) source,
-					source-> io.reactivex.Flowable.fromPublisher(source)
+					Flowable::fromPublisher
 			);
 			registry.registerReactiveType(
 					multiValue(io.reactivex.Observable.class, io.reactivex.Observable::empty),
@@ -210,6 +276,28 @@ public class ReactiveAdapterRegistry {
 	}
 
 
+	private static class ReactorJdkFlowAdapterRegistrar {
+
+		// TODO: remove reflection when build requires JDK 9+
+		void registerAdapter(ReactiveAdapterRegistry registry) throws Exception {
+			Class<?> type = ClassUtils.forName("java.util.concurrent.Flow.Publisher", getClass().getClassLoader());
+			Method toFluxMethod = getMethod("flowPublisherToFlux", type);
+			Method toFlowMethod = getMethod("publisherToFlowPublisher", Publisher.class);
+			Object emptyFlow = ReflectionUtils.invokeMethod(toFlowMethod, null, Flux.empty());
+
+			registry.registerReactiveType(
+					multiValue(type, () -> emptyFlow),
+					source -> (Publisher<?>) ReflectionUtils.invokeMethod(toFluxMethod, null, source),
+					publisher -> ReflectionUtils.invokeMethod(toFlowMethod, null, publisher)
+			);
+		}
+
+		private static Method getMethod(String name, Class<?> argumentType) throws NoSuchMethodException {
+			return reactor.adapter.JdkFlowAdapter.class.getMethod(name, argumentType);
+		}
+	}
+
+
 	/**
 	 * Extension of ReactiveAdapter that wraps adapted (raw) Publisher's as
 	 * {@link Flux} or {@link Mono} depending on the underlying reactive type's
@@ -225,7 +313,7 @@ public class ReactiveAdapterRegistry {
 		}
 
 		@Override
-		public <T> Publisher<T> toPublisher(Object source) {
+		public <T> Publisher<T> toPublisher(@Nullable Object source) {
 			Publisher<T> publisher = super.toPublisher(source);
 			return (isMultiValue() ? Flux.from(publisher) : Mono.from(publisher));
 		}

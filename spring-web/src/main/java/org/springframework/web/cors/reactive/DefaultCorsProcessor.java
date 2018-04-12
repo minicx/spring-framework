@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.springframework.web.cors.reactive;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
@@ -27,6 +28,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.lang.Nullable;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.server.ServerWebExchange;
@@ -51,7 +53,7 @@ public class DefaultCorsProcessor implements CorsProcessor {
 
 
 	@Override
-	public boolean processRequest(CorsConfiguration config, ServerWebExchange exchange) {
+	public boolean process(@Nullable CorsConfiguration config, ServerWebExchange exchange) {
 
 		ServerHttpRequest request = exchange.getRequest();
 		ServerHttpResponse response = exchange.getResponse();
@@ -104,24 +106,36 @@ public class DefaultCorsProcessor implements CorsProcessor {
 
 		ServerHttpRequest request = exchange.getRequest();
 		ServerHttpResponse response = exchange.getResponse();
+		HttpHeaders responseHeaders = response.getHeaders();
+
+		response.getHeaders().addAll(HttpHeaders.VARY, Arrays.asList(HttpHeaders.ORIGIN,
+				HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS));
 
 		String requestOrigin = request.getHeaders().getOrigin();
 		String allowOrigin = checkOrigin(config, requestOrigin);
-
-		HttpMethod requestMethod = getMethodToUse(request, preFlightRequest);
-		List<HttpMethod> allowMethods = checkMethods(config, requestMethod);
-
-		List<String> requestHeaders = getHeadersToUse(request, preFlightRequest);
-		List<String> allowHeaders = checkHeaders(config, requestHeaders);
-
-		if (allowOrigin == null || allowMethods == null || (preFlightRequest && allowHeaders == null)) {
+		if (allowOrigin == null) {
+			logger.debug("Rejecting CORS request because '" + requestOrigin + "' origin is not allowed");
 			rejectRequest(response);
 			return false;
 		}
 
-		HttpHeaders responseHeaders = response.getHeaders();
+		HttpMethod requestMethod = getMethodToUse(request, preFlightRequest);
+		List<HttpMethod> allowMethods = checkMethods(config, requestMethod);
+		if (allowMethods == null) {
+			logger.debug("Rejecting CORS request because '" + requestMethod + "' request method is not allowed");
+			rejectRequest(response);
+			return false;
+		}
+
+		List<String> requestHeaders = getHeadersToUse(request, preFlightRequest);
+		List<String> allowHeaders = checkHeaders(config, requestHeaders);
+		if (preFlightRequest && allowHeaders == null) {
+			logger.debug("Rejecting CORS request because '" + requestHeaders + "' request headers are not allowed");
+			rejectRequest(response);
+			return false;
+		}
+
 		responseHeaders.setAccessControlAllowOrigin(allowOrigin);
-		responseHeaders.add(HttpHeaders.VARY, HttpHeaders.ORIGIN);
 
 		if (preFlightRequest) {
 			responseHeaders.setAccessControlAllowMethods(allowMethods);
@@ -151,7 +165,8 @@ public class DefaultCorsProcessor implements CorsProcessor {
 	 * implementation simply delegates to
 	 * {@link CorsConfiguration#checkOrigin(String)}.
 	 */
-	protected String checkOrigin(CorsConfiguration config, String requestOrigin) {
+	@Nullable
+	protected String checkOrigin(CorsConfiguration config, @Nullable String requestOrigin) {
 		return config.checkOrigin(requestOrigin);
 	}
 
@@ -160,10 +175,12 @@ public class DefaultCorsProcessor implements CorsProcessor {
 	 * pre-flight request. The default implementation simply delegates to
 	 * {@link CorsConfiguration#checkOrigin(String)}.
 	 */
-	protected List<HttpMethod> checkMethods(CorsConfiguration config, HttpMethod requestMethod) {
+	@Nullable
+	protected List<HttpMethod> checkMethods(CorsConfiguration config, @Nullable HttpMethod requestMethod) {
 		return config.checkHttpMethod(requestMethod);
 	}
 
+	@Nullable
 	private HttpMethod getMethodToUse(ServerHttpRequest request, boolean isPreFlight) {
 		return (isPreFlight ? request.getHeaders().getAccessControlRequestMethod() : request.getMethod());
 	}
@@ -173,6 +190,8 @@ public class DefaultCorsProcessor implements CorsProcessor {
 	 * pre-flight request. The default implementation simply delegates to
 	 * {@link CorsConfiguration#checkOrigin(String)}.
 	 */
+	@Nullable
+
 	protected List<String> checkHeaders(CorsConfiguration config, List<String> requestHeaders) {
 		return config.checkHeaders(requestHeaders);
 	}

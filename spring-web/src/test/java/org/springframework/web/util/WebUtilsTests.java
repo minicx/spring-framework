@@ -30,7 +30,10 @@ import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.mock.web.test.MockHttpServletRequest;
 import org.springframework.util.MultiValueMap;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author Juergen Hoeller
@@ -126,10 +129,35 @@ public class WebUtilsTests {
 		// Handling of IPv6 hosts as described in SPR-13525
 		assertTrue(checkSameOrigin("[::1]", -1, "http://[::1]"));
 		assertTrue(checkSameOrigin("[::1]", 8080, "http://[::1]:8080"));
-		assertTrue(checkSameOrigin("[2001:0db8:0000:85a3:0000:0000:ac1f:8001]", -1, "http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]"));
-		assertTrue(checkSameOrigin("[2001:0db8:0000:85a3:0000:0000:ac1f:8001]", 8080, "http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]:8080"));
+		assertTrue(checkSameOrigin(
+				"[2001:0db8:0000:85a3:0000:0000:ac1f:8001]", -1,
+				"http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]"));
+		assertTrue(checkSameOrigin(
+				"[2001:0db8:0000:85a3:0000:0000:ac1f:8001]", 8080,
+				"http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]:8080"));
 		assertFalse(checkSameOrigin("[::1]", -1, "http://[::1]:8080"));
-		assertFalse(checkSameOrigin("[::1]", 8080, "http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]:8080"));
+		assertFalse(checkSameOrigin("[::1]", 8080,
+				"http://[2001:0db8:0000:85a3:0000:0000:ac1f:8001]:8080"));
+	}
+
+	@Test  // SPR-16262
+	public void isSameOriginWithXForwardedHeaders() {
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", -1, "https", null, -1, "https://mydomain1.com"));
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", 123, "https", null, -1, "https://mydomain1.com"));
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", -1, "https", "mydomain2.com", -1, "https://mydomain2.com"));
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", 123, "https", "mydomain2.com", -1, "https://mydomain2.com"));
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", -1, "https", "mydomain2.com", 456, "https://mydomain2.com:456"));
+		assertTrue(checkSameOriginWithXForwardedHeaders("mydomain1.com", 123, "https", "mydomain2.com", 456, "https://mydomain2.com:456"));
+	}
+
+	@Test  // SPR-16262
+	public void isSameOriginWithForwardedHeader() {
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", -1, "proto=https", "https://mydomain1.com"));
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", 123, "proto=https", "https://mydomain1.com"));
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", -1, "proto=https; host=mydomain2.com", "https://mydomain2.com"));
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", 123, "proto=https; host=mydomain2.com", "https://mydomain2.com"));
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", -1, "proto=https; host=mydomain2.com:456", "https://mydomain2.com:456"));
+		assertTrue(checkSameOriginWithForwardedHeader("mydomain1.com", 123, "proto=https; host=mydomain2.com:456", "https://mydomain2.com:456"));
 	}
 
 
@@ -140,7 +168,7 @@ public class WebUtilsTests {
 		if (port != -1) {
 			servletRequest.setServerPort(port);
 		}
-		request.getHeaders().set(HttpHeaders.ORIGIN, originHeader);
+		servletRequest.addHeader(HttpHeaders.ORIGIN, originHeader);
 		return WebUtils.isValidOrigin(request, allowed);
 	}
 
@@ -151,7 +179,39 @@ public class WebUtilsTests {
 		if (port != -1) {
 			servletRequest.setServerPort(port);
 		}
-		request.getHeaders().set(HttpHeaders.ORIGIN, originHeader);
+		servletRequest.addHeader(HttpHeaders.ORIGIN, originHeader);
+		return WebUtils.isSameOrigin(request);
+	}
+
+	private boolean checkSameOriginWithXForwardedHeaders(String serverName, int port, String forwardedProto, String forwardedHost, int forwardedPort, String originHeader) {
+		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+		ServerHttpRequest request = new ServletServerHttpRequest(servletRequest);
+		servletRequest.setServerName(serverName);
+		if (port != -1) {
+			servletRequest.setServerPort(port);
+		}
+		if (forwardedProto != null) {
+			servletRequest.addHeader("X-Forwarded-Proto", forwardedProto);
+		}
+		if (forwardedHost != null) {
+			servletRequest.addHeader("X-Forwarded-Host", forwardedHost);
+		}
+		if (forwardedPort != -1) {
+			servletRequest.addHeader("X-Forwarded-Port", String.valueOf(forwardedPort));
+		}
+		servletRequest.addHeader(HttpHeaders.ORIGIN, originHeader);
+		return WebUtils.isSameOrigin(request);
+	}
+
+	private boolean checkSameOriginWithForwardedHeader(String serverName, int port, String forwardedHeader, String originHeader) {
+		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+		ServerHttpRequest request = new ServletServerHttpRequest(servletRequest);
+		servletRequest.setServerName(serverName);
+		if (port != -1) {
+			servletRequest.setServerPort(port);
+		}
+		servletRequest.addHeader("Forwarded", forwardedHeader);
+		servletRequest.addHeader(HttpHeaders.ORIGIN, originHeader);
 		return WebUtils.isSameOrigin(request);
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import java.io.UnsupportedEncodingException;
 import java.security.Principal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -55,11 +56,13 @@ import javax.servlet.http.HttpSession;
 import javax.servlet.http.HttpUpgradeHandler;
 import javax.servlet.http.Part;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.util.Assert;
 import org.springframework.util.LinkedCaseInsensitiveMap;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.util.ObjectUtils;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 
@@ -86,10 +89,6 @@ public class MockHttpServletRequest implements HttpServletRequest {
 	private static final String HTTP = "http";
 
 	private static final String HTTPS = "https";
-
-	private static final String CONTENT_TYPE_HEADER = "Content-Type";
-
-	private static final String HOST_HEADER = "Host";
 
 	private static final String CHARSET_PREFIX = "charset=";
 
@@ -387,7 +386,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 					StringUtils.hasLength(this.characterEncoding)) {
 				sb.append(";").append(CHARSET_PREFIX).append(this.characterEncoding);
 			}
-			doAddHeaderValue(CONTENT_TYPE_HEADER, sb.toString(), true);
+			doAddHeaderValue(HttpHeaders.CONTENT_TYPE, sb.toString(), true);
 		}
 	}
 
@@ -406,7 +405,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	/**
 	 * Get the content of the request body as a byte array.
-	 * @return the content as a byte array, potentially {@code null}
+	 * @return the content as a byte array (potentially {@code null})
 	 * @since 5.0
 	 * @see #setContent(byte[])
 	 * @see #getContentAsString()
@@ -456,7 +455,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 					this.characterEncoding = mediaType.getCharset().name();
 				}
 			}
-			catch (Exception ex) {
+			catch (IllegalArgumentException ex) {
 				// Try to get charset value anyway
 				int charsetIndex = contentType.toLowerCase().indexOf(CHARSET_PREFIX);
 				if (charsetIndex != -1) {
@@ -590,7 +589,8 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	@Override
 	public String getParameter(String name) {
-		String[] arr = (name != null ? this.parameters.get(name) : null);
+		Assert.notNull(name, "Parameter name must not be null");
+		String[] arr = this.parameters.get(name);
 		return (arr != null && arr.length > 0 ? arr[0] : null);
 	}
 
@@ -601,7 +601,8 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	@Override
 	public String[] getParameterValues(String name) {
-		return (name != null ? this.parameters.get(name) : null);
+		Assert.notNull(name, "Parameter name must not be null");
+		return this.parameters.get(name);
 	}
 
 	@Override
@@ -633,7 +634,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	@Override
 	public String getServerName() {
-		String host = getHeader(HOST_HEADER);
+		String host = getHeader(HttpHeaders.HOST);
 		if (host != null) {
 			host = host.trim();
 			if (host.startsWith("[")) {
@@ -655,7 +656,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	@Override
 	public int getServerPort() {
-		String host = getHeader(HOST_HEADER);
+		String host = getHeader(HttpHeaders.HOST);
 		if (host != null) {
 			host = host.trim();
 			int idx;
@@ -739,6 +740,7 @@ public class MockHttpServletRequest implements HttpServletRequest {
 	public void addPreferredLocale(Locale locale) {
 		Assert.notNull(locale, "Locale must not be null");
 		this.locales.add(0, locale);
+		updateAcceptLanguageHeader();
 	}
 
 	/**
@@ -751,6 +753,13 @@ public class MockHttpServletRequest implements HttpServletRequest {
 		Assert.notEmpty(locales, "Locale list must not be empty");
 		this.locales.clear();
 		this.locales.addAll(locales);
+		updateAcceptLanguageHeader();
+	}
+
+	private void updateAcceptLanguageHeader() {
+		HttpHeaders headers = new HttpHeaders();
+		headers.setAcceptLanguageAsLocales(this.locales);
+		doAddHeaderValue(HttpHeaders.ACCEPT_LANGUAGE, headers.getFirst(HttpHeaders.ACCEPT_LANGUAGE), true);
 	}
 
 	/**
@@ -921,7 +930,13 @@ public class MockHttpServletRequest implements HttpServletRequest {
 	}
 
 	public void setCookies(Cookie... cookies) {
-		this.cookies = cookies;
+		this.cookies = (ObjectUtils.isEmpty(cookies) ? null : cookies);
+		this.headers.remove(HttpHeaders.COOKIE);
+		if (this.cookies != null) {
+			Arrays.stream(this.cookies)
+					.map(c -> c.getName() + '=' + (c.getValue() == null ? "" : c.getValue()))
+					.forEach(value -> doAddHeaderValue(HttpHeaders.COOKIE, value, false));
+		}
 	}
 
 	@Override
@@ -945,8 +960,21 @@ public class MockHttpServletRequest implements HttpServletRequest {
 	 * @see #getDateHeader
 	 */
 	public void addHeader(String name, Object value) {
-		if (CONTENT_TYPE_HEADER.equalsIgnoreCase(name) && !this.headers.containsKey(CONTENT_TYPE_HEADER)) {
+		if (HttpHeaders.CONTENT_TYPE.equalsIgnoreCase(name) &&
+				!this.headers.containsKey(HttpHeaders.CONTENT_TYPE)) {
 			setContentType(value.toString());
+		}
+		else if (HttpHeaders.ACCEPT_LANGUAGE.equalsIgnoreCase(name) &&
+				!this.headers.containsKey(HttpHeaders.ACCEPT_LANGUAGE)) {
+			try {
+				HttpHeaders headers = new HttpHeaders();
+				headers.add(HttpHeaders.ACCEPT_LANGUAGE, value.toString());
+				setPreferredLocales(headers.getAcceptLanguageAsLocales());
+			}
+			catch (IllegalArgumentException ex) {
+				// Invalid Accept-Language format -> store plain header instead
+				doAddHeaderValue(name, value, true);
+			}
 		}
 		else {
 			doAddHeaderValue(name, value, false);
@@ -1143,13 +1171,18 @@ public class MockHttpServletRequest implements HttpServletRequest {
 
 	@Override
 	public StringBuffer getRequestURL() {
-		StringBuffer url = new StringBuffer(this.scheme).append("://").append(this.serverName);
-		if (this.serverPort > 0 && ((HTTP.equalsIgnoreCase(this.scheme) && this.serverPort != 80) ||
-				(HTTPS.equalsIgnoreCase(this.scheme) && this.serverPort != 443))) {
-			url.append(':').append(this.serverPort);
+		String scheme = getScheme();
+		String server = getServerName();
+		int port = getServerPort();
+		String uri = getRequestURI();
+
+		StringBuffer url = new StringBuffer(scheme).append("://").append(server);
+		if (port > 0 && ((HTTP.equalsIgnoreCase(scheme) && port != 80) ||
+				(HTTPS.equalsIgnoreCase(scheme) && port != 443))) {
+			url.append(':').append(port);
 		}
-		if (StringUtils.hasText(getRequestURI())) {
-			url.append(getRequestURI());
+		if (StringUtils.hasText(uri)) {
+			url.append(uri);
 		}
 		return url;
 	}
@@ -1259,12 +1292,12 @@ public class MockHttpServletRequest implements HttpServletRequest {
 	}
 
 	@Override
-	public Part getPart(String name) throws IOException, IllegalStateException, ServletException {
+	public Part getPart(String name) throws IOException, ServletException {
 		return this.parts.getFirst(name);
 	}
 
 	@Override
-	public Collection<Part> getParts() throws IOException, IllegalStateException, ServletException {
+	public Collection<Part> getParts() throws IOException, ServletException {
 		List<Part> result = new LinkedList<>();
 		for (List<Part> list : this.parts.values()) {
 			result.addAll(list);

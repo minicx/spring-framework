@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.MultiValueMap;
 
@@ -49,12 +50,14 @@ public abstract class UriComponents implements Serializable {
 	private static final Pattern NAMES_PATTERN = Pattern.compile("\\{([^/]+?)\\}");
 
 
+	@Nullable
 	private final String scheme;
 
+	@Nullable
 	private final String fragment;
 
 
-	protected UriComponents(String scheme, String fragment) {
+	protected UriComponents(@Nullable String scheme, @Nullable String fragment) {
 		this.scheme = scheme;
 		this.fragment = fragment;
 	}
@@ -65,23 +68,35 @@ public abstract class UriComponents implements Serializable {
 	/**
 	 * Return the scheme. Can be {@code null}.
 	 */
+	@Nullable
 	public final String getScheme() {
 		return this.scheme;
 	}
 
 	/**
+	 * Return the fragment. Can be {@code null}.
+	 */
+	@Nullable
+	public final String getFragment() {
+		return this.fragment;
+	}
+
+	/**
 	 * Return the scheme specific part. Can be {@code null}.
 	 */
+	@Nullable
 	public abstract String getSchemeSpecificPart();
 
 	/**
 	 * Return the user info. Can be {@code null}.
 	 */
+	@Nullable
 	public abstract String getUserInfo();
 
 	/**
 	 * Return the host. Can be {@code null}.
 	 */
+	@Nullable
 	public abstract String getHost();
 
 	/**
@@ -92,6 +107,7 @@ public abstract class UriComponents implements Serializable {
 	/**
 	 * Return the path. Can be {@code null}.
 	 */
+	@Nullable
 	public abstract String getPath();
 
 	/**
@@ -102,6 +118,7 @@ public abstract class UriComponents implements Serializable {
 	/**
 	 * Return the query. Can be {@code null}.
 	 */
+	@Nullable
 	public abstract String getQuery();
 
 	/**
@@ -109,30 +126,25 @@ public abstract class UriComponents implements Serializable {
 	 */
 	public abstract MultiValueMap<String, String> getQueryParams();
 
-	/**
-	 * Return the fragment. Can be {@code null}.
-	 */
-	public final String getFragment() {
-		return this.fragment;
-	}
-
 
 	/**
-	 * Encode all URI components using their specific encoding rules, and returns the
-	 * result as a new {@code UriComponents} instance. This method uses UTF-8 to encode.
-	 * @return the encoded URI components
+	 * A variant of {@link #encode(Charset)} that uses "UTF-8" as the charset.
+	 * @return a new {@code UriComponents} instance with encoded values
 	 */
 	public final UriComponents encode() {
 		return encode(StandardCharsets.UTF_8);
 	}
 
 	/**
-	 * Encode all URI components using their specific encoding rules, and
-	 * returns the result as a new {@code UriComponents} instance.
+	 * Encode each URI component by percent encoding illegal characters, which
+	 * includes non-US-ASCII characters, and also characters that are otherwise
+	 * illegal within a given URI component type, as defined in RFC 3986. The
+	 * effect of this method, with regards to encoding, is comparable to using
+	 * the multi-argument constructor of {@link URI}.
 	 * @param charset the encoding of the values contained in this map
-	 * @return the encoded URI components
+	 * @return a new {@code UriComponents} instance with encoded values
 	 */
-	public abstract UriComponents encode(Charset charset) ;
+	public abstract UriComponents encode(Charset charset);
 
 	/**
 	 * Replace all URI template variables with the values from a given map.
@@ -177,21 +189,36 @@ public abstract class UriComponents implements Serializable {
 	abstract UriComponents expandInternal(UriTemplateVariables uriVariables);
 
 	/**
-	 * Normalize the path removing sequences like "path/..".
+	 * Normalize the path removing sequences like "path/..". Note that
+	 * normalization is applied to the full path, and not to individual path
+	 * segments.
 	 * @see org.springframework.util.StringUtils#cleanPath(String)
 	 */
 	public abstract UriComponents normalize();
 
 	/**
-	 * Return a URI String from this {@code UriComponents} instance.
+	 * Concatenate all URI components to return the fully formed URI String.
+	 * <p>This method does nothing more than a simple concatenation based on
+	 * current values. That means it could produce different results if invoked
+	 * before vs after methods that can change individual values such as
+	 * {@code encode}, {@code expand}, or {@code normalize}.
 	 */
 	public abstract String toUriString();
 
 	/**
-	 * Return a {@code URI} from this {@code UriComponents} instance.
+	 * Create a {@link URI} from this instance as follows:
+	 * <p>If the current instance is {@link #encode() encoded}, form the full
+	 * URI String via {@link #toUriString()}, and then pass it to the single
+	 * argument {@link URI} constructor which preserves percent encoding.
+	 * <p>If not yet encoded, pass individual URI component values to the
+	 * multi-argument {@link URI} constructor which quotes illegal characters
+	 * that cannot appear in their respective URI component.
 	 */
 	public abstract URI toUri();
 
+	/**
+	 * A simple pass-through to {@link #toUriString()}.
+	 */
 	@Override
 	public final String toString() {
 		return toUriString();
@@ -206,7 +233,8 @@ public abstract class UriComponents implements Serializable {
 
 	// Static expansion helpers
 
-	static String expandUriComponent(String source, UriTemplateVariables uriVariables) {
+	@Nullable
+	static String expandUriComponent(@Nullable String source, UriTemplateVariables uriVariables) {
 		if (source == null) {
 			return null;
 		}
@@ -259,7 +287,7 @@ public abstract class UriComponents implements Serializable {
 		return (colonIdx != -1 ? match.substring(0, colonIdx) : match);
 	}
 
-	private static String getVariableValueAsString(Object variableValue) {
+	private static String getVariableValueAsString(@Nullable Object variableValue) {
 		return (variableValue != null ? variableValue.toString() : "");
 	}
 
@@ -279,7 +307,8 @@ public abstract class UriComponents implements Serializable {
 		 * @param name the variable name
 		 * @return the variable value, possibly {@code null} or {@link #SKIP_VALUE}
 		 */
-		Object getValue(String name);
+		@Nullable
+		Object getValue(@Nullable String name);
 	}
 
 
@@ -295,7 +324,8 @@ public abstract class UriComponents implements Serializable {
 		}
 
 		@Override
-		public Object getValue(String name) {
+		@Nullable
+		public Object getValue(@Nullable String name) {
 			if (!this.uriVariables.containsKey(name)) {
 				throw new IllegalArgumentException("Map has no value for '" + name + "'");
 			}
@@ -316,7 +346,8 @@ public abstract class UriComponents implements Serializable {
 		}
 
 		@Override
-		public Object getValue(String name) {
+		@Nullable
+		public Object getValue(@Nullable String name) {
 			if (!this.valueIterator.hasNext()) {
 				throw new IllegalArgumentException("Not enough variable values available to expand '" + name + "'");
 			}

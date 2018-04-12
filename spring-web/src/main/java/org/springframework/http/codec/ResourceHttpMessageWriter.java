@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
@@ -32,7 +31,6 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.codec.ResourceDecoder;
 import org.springframework.core.codec.ResourceEncoder;
 import org.springframework.core.codec.ResourceRegionEncoder;
-import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
@@ -46,9 +44,10 @@ import org.springframework.http.ReactiveHttpOutputMessage;
 import org.springframework.http.ZeroCopyHttpOutputMessage;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.lang.Nullable;
 import org.springframework.util.MimeTypeUtils;
 
-import static java.util.Collections.emptyMap;
+import static java.util.Collections.*;
 
 /**
  * {@code HttpMessageWriter} that can write a {@link Resource}.
@@ -92,7 +91,7 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 
 
 	@Override
-	public boolean canWrite(ResolvableType elementType, MediaType mediaType) {
+	public boolean canWrite(ResolvableType elementType, @Nullable MediaType mediaType) {
 		return this.encoder.canEncode(elementType, mediaType);
 	}
 
@@ -106,13 +105,13 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 
 	@Override
 	public Mono<Void> write(Publisher<? extends Resource> inputStream, ResolvableType elementType,
-			MediaType mediaType, ReactiveHttpOutputMessage message, Map<String, Object> hints) {
+			@Nullable MediaType mediaType, ReactiveHttpOutputMessage message, Map<String, Object> hints) {
 
-		return Mono.from(inputStream).then(resource ->
+		return Mono.from(inputStream).flatMap(resource ->
 				writeResource(resource, elementType, mediaType, message, hints));
 	}
 
-	private Mono<Void> writeResource(Resource resource, ResolvableType type, MediaType mediaType,
+	private Mono<Void> writeResource(Resource resource, ResolvableType type, @Nullable MediaType mediaType,
 			ReactiveHttpOutputMessage message, Map<String, Object> hints) {
 
 		HttpHeaders headers = message.getHeaders();
@@ -120,7 +119,10 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 		headers.setContentType(resourceMediaType);
 
 		if (headers.getContentLength() < 0) {
-			lengthOf(resource).ifPresent(headers::setContentLength);
+			Long contentLength = this.encoder.getContentLength(resource, mediaType);
+			if (contentLength != null) {
+				headers.setContentLength(contentLength);
+			}
 		}
 
 		return zeroCopy(resource, null, message)
@@ -132,39 +134,25 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 				});
 	}
 
-	private static MediaType getResourceMediaType(MediaType type, Resource resource) {
-		if (type != null && type.isConcrete() && !type.equals(MediaType.APPLICATION_OCTET_STREAM)) {
-			return type;
+	private static MediaType getResourceMediaType(@Nullable MediaType mediaType, Resource resource) {
+		if (mediaType != null && mediaType.isConcrete() && !mediaType.equals(MediaType.APPLICATION_OCTET_STREAM)) {
+			return mediaType;
 		}
 		return MediaTypeFactory.getMediaType(resource).orElse(MediaType.APPLICATION_OCTET_STREAM);
 	}
 
-	private static OptionalLong lengthOf(Resource resource) {
-		// Don't consume InputStream...
-		if (InputStreamResource.class != resource.getClass()) {
-			try {
-				return OptionalLong.of(resource.contentLength());
-			}
-			catch (IOException ignored) {
-			}
-		}
-		return OptionalLong.empty();
-	}
-
-	private static Optional<Mono<Void>> zeroCopy(Resource resource, ResourceRegion region,
+	private static Optional<Mono<Void>> zeroCopy(Resource resource, @Nullable ResourceRegion region,
 			ReactiveHttpOutputMessage message) {
 
-		if (message instanceof ZeroCopyHttpOutputMessage) {
-			if (resource.isFile()) {
-				try {
-					File file = resource.getFile();
-					long pos = region != null ? region.getPosition() : 0;
-					long count = region != null ? region.getCount() : file.length();
-					return Optional.of(((ZeroCopyHttpOutputMessage) message).writeWith(file, pos, count));
-				}
-				catch (IOException ex) {
-					// should not happen
-				}
+		if (message instanceof ZeroCopyHttpOutputMessage && resource.isFile()) {
+			try {
+				File file = resource.getFile();
+				long pos = region != null ? region.getPosition() : 0;
+				long count = region != null ? region.getCount() : file.length();
+				return Optional.of(((ZeroCopyHttpOutputMessage) message).writeWith(file, pos, count));
+			}
+			catch (IOException ex) {
+				// should not happen
 			}
 		}
 		return Optional.empty();
@@ -175,8 +163,8 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 
 	@Override
 	@SuppressWarnings("unchecked")
-	public Mono<Void> write(Publisher<? extends Resource> inputStream, ResolvableType actualType,
-			ResolvableType elementType, MediaType mediaType, ServerHttpRequest request,
+	public Mono<Void> write(Publisher<? extends Resource> inputStream, @Nullable ResolvableType actualType,
+			ResolvableType elementType, @Nullable MediaType mediaType, ServerHttpRequest request,
 			ServerHttpResponse response, Map<String, Object> hints) {
 
 		HttpHeaders headers = response.getHeaders();
@@ -191,7 +179,7 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 			return response.setComplete();
 		}
 
-		return Mono.from(inputStream).then(resource -> {
+		return Mono.from(inputStream).flatMap(resource -> {
 
 			if (ranges.isEmpty()) {
 				return writeResource(resource, elementType, mediaType, response, hints);
@@ -204,13 +192,14 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 			if (regions.size() == 1){
 				ResourceRegion region = regions.get(0);
 				headers.setContentType(resourceMediaType);
-				lengthOf(resource).ifPresent(length -> {
+				Long contentLength = this.encoder.getContentLength(resource, mediaType);
+				if (contentLength != null) {
 					long start = region.getPosition();
 					long end = start + region.getCount() - 1;
-					end = Math.min(end, length - 1);
-					headers.add("Content-Range", "bytes " + start + '-' + end + '/' + length);
+					end = Math.min(end, contentLength - 1);
+					headers.add("Content-Range", "bytes " + start + '-' + end + '/' + contentLength);
 					headers.setContentLength(end - start + 1);
-				});
+				}
 				return writeSingleRegion(region, response);
 			}
 			else {
@@ -235,7 +224,7 @@ public class ResourceHttpMessageWriter implements HttpMessageWriter<Resource> {
 	}
 
 	private Mono<Void> encodeAndWriteRegions(Publisher<? extends ResourceRegion> publisher,
-			MediaType mediaType, ReactiveHttpOutputMessage message, Map<String, Object> hints) {
+			@Nullable MediaType mediaType, ReactiveHttpOutputMessage message, Map<String, Object> hints) {
 
 		Flux<DataBuffer> body = this.regionEncoder.encode(
 				publisher, message.bufferFactory(), REGION_TYPE, mediaType, hints);

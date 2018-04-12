@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package org.springframework.web.reactive.config;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -28,22 +27,15 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import org.springframework.context.support.StaticApplicationContext;
-import org.springframework.core.convert.ConversionService;
 import org.springframework.format.FormatterRegistry;
 import org.springframework.http.codec.HttpMessageWriter;
 import org.springframework.http.codec.ServerCodecConfigurer;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import org.springframework.web.bind.support.ConfigurableWebBindingInitializer;
 import org.springframework.web.reactive.accept.RequestedContentTypeResolverBuilder;
-import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerAdapter;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.BDDMockito.any;
-import static org.mockito.BDDMockito.doAnswer;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.verify;
+import static org.junit.Assert.*;
+import static org.mockito.BDDMockito.*;
 
 /**
  * Test fixture for {@link DelegatingWebFluxConfiguration} tests.
@@ -72,8 +64,8 @@ public class DelegatingWebFluxConfigurationTests {
 		MockitoAnnotations.initMocks(this);
 		delegatingConfig = new DelegatingWebFluxConfiguration();
 		delegatingConfig.setApplicationContext(new StaticApplicationContext());
-		given(webFluxConfigurer.getValidator()).willReturn(Optional.empty());
-		given(webFluxConfigurer.getMessageCodesResolver()).willReturn(Optional.empty());
+		given(webFluxConfigurer.getValidator()).willReturn(null);
+		given(webFluxConfigurer.getMessageCodesResolver()).willReturn(null);
 	}
 
 
@@ -90,20 +82,20 @@ public class DelegatingWebFluxConfigurationTests {
 	@Test
 	public void requestMappingHandlerAdapter() throws Exception {
 		delegatingConfig.setConfigurers(Collections.singletonList(webFluxConfigurer));
-		RequestMappingHandlerAdapter adapter = delegatingConfig.requestMappingHandlerAdapter();
 
-		ConfigurableWebBindingInitializer initializer = (ConfigurableWebBindingInitializer) adapter.getWebBindingInitializer();
-		ConversionService initializerConversionService = initializer.getConversionService();
-		assertTrue(initializer.getValidator() instanceof LocalValidatorFactoryBean);
+		ConfigurableWebBindingInitializer initializer = (ConfigurableWebBindingInitializer)
+				this.delegatingConfig.requestMappingHandlerAdapter().getWebBindingInitializer();
 
 		verify(webFluxConfigurer).configureHttpMessageCodecs(codecsConfigurer.capture());
 		verify(webFluxConfigurer).getValidator();
 		verify(webFluxConfigurer).getMessageCodesResolver();
 		verify(webFluxConfigurer).addFormatters(formatterRegistry.capture());
-		verify(webFluxConfigurer).addArgumentResolvers(any());
+		verify(webFluxConfigurer).configureArgumentResolvers(any());
 
-		assertSame(formatterRegistry.getValue(), initializerConversionService);
-		assertEquals(8, codecsConfigurer.getValue().getReaders().size());
+		assertNotNull(initializer);
+		assertTrue(initializer.getValidator() instanceof LocalValidatorFactoryBean);
+		assertSame(formatterRegistry.getValue(), initializer.getConversionService());
+		assertEquals(12, codecsConfigurer.getValue().getReaders().size());
 	}
 
 	@Test

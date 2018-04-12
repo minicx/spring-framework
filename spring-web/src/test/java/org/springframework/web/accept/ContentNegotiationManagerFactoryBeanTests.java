@@ -16,13 +16,14 @@
 
 package org.springframework.web.accept;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
-
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.test.MockHttpServletRequest;
 import org.springframework.mock.web.test.MockServletContext;
@@ -89,6 +90,25 @@ public class ContentNegotiationManagerFactoryBeanTests {
 	}
 
 	@Test
+	public void explicitStrategies() throws Exception {
+		Map<String, MediaType> mediaTypes = Collections.singletonMap("bar", new MediaType("application", "bar"));
+		ParameterContentNegotiationStrategy strategy1 = new ParameterContentNegotiationStrategy(mediaTypes);
+		HeaderContentNegotiationStrategy strategy2 = new HeaderContentNegotiationStrategy();
+		List<ContentNegotiationStrategy> strategies = Arrays.asList(strategy1, strategy2);
+		this.factoryBean.setStrategies(strategies);
+		this.factoryBean.afterPropertiesSet();
+		ContentNegotiationManager manager = this.factoryBean.getObject();
+
+		assertEquals(strategies, manager.getStrategies());
+
+		this.servletRequest.setRequestURI("/flower");
+		this.servletRequest.addParameter("format", "bar");
+		assertEquals(Collections.singletonList(new MediaType("application", "bar")),
+				manager.resolveMediaTypes(this.webRequest));
+
+	}
+
+	@Test
 	public void favorPath() throws Exception {
 		this.factoryBean.setFavorPathExtension(true);
 		this.factoryBean.addMediaTypes(Collections.singletonMap("bar", new MediaType("application", "bar")));
@@ -145,7 +165,7 @@ public class ContentNegotiationManagerFactoryBeanTests {
 		ContentNegotiationManager manager = this.factoryBean.getObject();
 
 		this.servletRequest.setRequestURI("/flower");
-		this.servletRequest.setParameter("format", "xyz");
+		this.servletRequest.setParameter("format", "invalid");
 
 		manager.resolveMediaTypes(this.webRequest);
 	}
@@ -168,13 +188,24 @@ public class ContentNegotiationManagerFactoryBeanTests {
 		this.factoryBean.afterPropertiesSet();
 		ContentNegotiationManager manager = this.factoryBean.getObject();
 
-		assertEquals(Collections.singletonList(MediaType.APPLICATION_JSON),
-				manager.resolveMediaTypes(this.webRequest));
+		assertEquals(MediaType.APPLICATION_JSON, manager.resolveMediaTypes(this.webRequest).get(0));
 
 		// SPR-10513
 		this.servletRequest.addHeader("Accept", MediaType.ALL_VALUE);
-		assertEquals(Collections.singletonList(MediaType.APPLICATION_JSON),
-				manager.resolveMediaTypes(this.webRequest));
+		assertEquals(MediaType.APPLICATION_JSON, manager.resolveMediaTypes(this.webRequest).get(0));
+	}
+
+	@Test // SPR-15367
+	public void setDefaultContentTypes() throws Exception {
+		List<MediaType> mediaTypes = Arrays.asList(MediaType.APPLICATION_JSON, MediaType.ALL);
+		this.factoryBean.setDefaultContentTypes(mediaTypes);
+		this.factoryBean.afterPropertiesSet();
+		ContentNegotiationManager manager = this.factoryBean.getObject();
+
+		assertEquals(mediaTypes, manager.resolveMediaTypes(this.webRequest));
+
+		this.servletRequest.addHeader("Accept", MediaType.ALL_VALUE);
+		assertEquals(mediaTypes, manager.resolveMediaTypes(this.webRequest));
 	}
 
 	@Test  // SPR-12286

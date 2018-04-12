@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.web.bind.annotation.ValueConstants;
 
-import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.*;
 
 /**
  * Convenience class to resolve method parameters from hints.
@@ -77,7 +77,6 @@ import static java.util.stream.Collectors.joining;
  * return type, possibly with or without an annotation.
  *
  * <pre>
- *
  * import static org.springframework.web.method.ResolvableMethod.on;
  * import static org.springframework.web.method.MvcAnnotationPredicates.requestMapping;
  *
@@ -102,7 +101,6 @@ import static java.util.stream.Collectors.joining;
  * of methods with a wide array of argument types and parameter annotations.
  *
  * <pre>
- *
  * import static org.springframework.web.method.MvcAnnotationPredicates.requestParam;
  *
  * ResolvableMethod testMethod = ResolvableMethod.on(getClass()).named("handle").build();
@@ -118,7 +116,6 @@ import static java.util.stream.Collectors.joining;
  * Locate a method by invoking it through a proxy of the target handler:
  *
  * <pre>
- *
  * ResolvableMethod.on(TestController.class).mockCall(o -> o.handle(null)).method();
  * </pre>
  *
@@ -130,9 +127,7 @@ public class ResolvableMethod {
 
 	private static final SpringObjenesis objenesis = new SpringObjenesis();
 
-	private static final ParameterNameDiscoverer nameDiscoverer =
-			new LocalVariableTableParameterNameDiscoverer();
-
+	private static final ParameterNameDiscoverer nameDiscoverer = new LocalVariableTableParameterNameDiscoverer();
 
 	private final Method method;
 
@@ -238,9 +233,8 @@ public class ResolvableMethod {
 	}
 
 	private static ResolvableType toResolvableType(Class<?> type, Class<?>... generics) {
-		return ObjectUtils.isEmpty(generics) ?
-				ResolvableType.forClass(type) :
-				ResolvableType.forClassWithGenerics(type, generics);
+		return (ObjectUtils.isEmpty(generics) ? ResolvableType.forClass(type) :
+				ResolvableType.forClassWithGenerics(type, generics));
 	}
 
 	private static ResolvableType toResolvableType(Class<?> type, ResolvableType generic, ResolvableType... generics) {
@@ -282,7 +276,7 @@ public class ResolvableMethod {
 		/**
 		 * Filter on methods with the given name.
 		 */
-		public Builder named(String methodName) {
+		public Builder<T> named(String methodName) {
 			addFilter("methodName=" + methodName, m -> m.getName().equals(methodName));
 			return this;
 		}
@@ -292,7 +286,7 @@ public class ResolvableMethod {
 		 * See {@link MvcAnnotationPredicates}.
 		 */
 		@SafeVarargs
-		public final Builder annot(Predicate<Method>... filters) {
+		public final Builder<T> annot(Predicate<Method>... filters) {
 			this.filters.addAll(Arrays.asList(filters));
 			return this;
 		}
@@ -303,7 +297,7 @@ public class ResolvableMethod {
 		 * @see MvcAnnotationPredicates
 		 */
 		@SafeVarargs
-		public final Builder annotPresent(Class<? extends Annotation>... annotationTypes) {
+		public final Builder<T> annotPresent(Class<? extends Annotation>... annotationTypes) {
 			String message = "annotationPresent=" + Arrays.toString(annotationTypes);
 			addFilter(message, method ->
 					Arrays.stream(annotationTypes).allMatch(annotType ->
@@ -315,7 +309,7 @@ public class ResolvableMethod {
 		 * Filter on methods not annotated with the given annotation type.
 		 */
 		@SafeVarargs
-		public final Builder annotNotPresent(Class<? extends Annotation>... annotationTypes) {
+		public final Builder<T> annotNotPresent(Class<? extends Annotation>... annotationTypes) {
 			String message = "annotationNotPresent=" + Arrays.toString(annotationTypes);
 			addFilter(message, method -> {
 				if (annotationTypes.length != 0) {
@@ -334,7 +328,7 @@ public class ResolvableMethod {
 		 * @param returnType the return type
 		 * @param generics optional array of generic types
 		 */
-		public Builder returning(Class<?> returnType, Class<?>... generics) {
+		public Builder<T> returning(Class<?> returnType, Class<?>... generics) {
 			return returning(toResolvableType(returnType, generics));
 		}
 
@@ -344,7 +338,7 @@ public class ResolvableMethod {
 		 * @param generic at least one generic type
 		 * @param generics optional extra generic types
 		 */
-		public Builder returning(Class<?> returnType, ResolvableType generic, ResolvableType... generics) {
+		public Builder<T> returning(Class<?> returnType, ResolvableType generic, ResolvableType... generics) {
 			return returning(toResolvableType(returnType, generic, generics));
 		}
 
@@ -352,7 +346,7 @@ public class ResolvableMethod {
 		 * Filter on methods returning the given type.
 		 * @param returnType the return type
 		 */
-		public Builder returning(ResolvableType returnType) {
+		public Builder<T> returning(ResolvableType returnType) {
 			String expected = returnType.toString();
 			String message = "returnType=" + expected;
 			addFilter(message, m -> expected.equals(ResolvableType.forMethodReturnType(m).toString()));
@@ -362,16 +356,14 @@ public class ResolvableMethod {
 		/**
 		 * Build a {@code ResolvableMethod} from the provided filters which must
 		 * resolve to a unique, single method.
-		 *
 		 * <p>See additional resolveXxx shortcut methods going directly to
 		 * {@link Method} or return type parameter.
-		 *
 		 * @throws IllegalStateException for no match or multiple matches
 		 */
 		public ResolvableMethod build() {
 			Set<Method> methods = MethodIntrospector.selectMethods(this.objectClass, this::isMatch);
-			Assert.state(!methods.isEmpty(), "No matching method: " + this);
-			Assert.state(methods.size() == 1, "Multiple matching methods: " + this + formatMethods(methods));
+			Assert.state(!methods.isEmpty(), () -> "No matching method: " + this);
+			Assert.state(methods.size() == 1, () -> "Multiple matching methods: " + this + formatMethods(methods));
 			return new ResolvableMethod(methods.iterator().next());
 		}
 

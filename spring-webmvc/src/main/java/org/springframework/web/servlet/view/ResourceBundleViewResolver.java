@@ -32,6 +32,7 @@ import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.support.PropertiesBeanDefinitionReader;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.Ordered;
+import org.springframework.lang.Nullable;
 import org.springframework.web.context.support.GenericWebApplicationContext;
 import org.springframework.web.servlet.View;
 
@@ -63,7 +64,7 @@ public class ResourceBundleViewResolver extends AbstractCachingViewResolver
 		implements Ordered, InitializingBean, DisposableBean {
 
 	/** The default basename if no other basename is supplied. */
-	public final static String DEFAULT_BASENAME = "views";
+	public static final String DEFAULT_BASENAME = "views";
 
 
 	private int order = Integer.MAX_VALUE;  // default: same as non-Ordered
@@ -72,17 +73,17 @@ public class ResourceBundleViewResolver extends AbstractCachingViewResolver
 
 	private ClassLoader bundleClassLoader = Thread.currentThread().getContextClassLoader();
 
+	@Nullable
 	private String defaultParentView;
 
+	@Nullable
 	private Locale[] localesToInitialize;
 
 	/* Locale -> BeanFactory */
-	private final Map<Locale, BeanFactory> localeCache =
-			new HashMap<>();
+	private final Map<Locale, BeanFactory> localeCache = new HashMap<>();
 
 	/* List of ResourceBundle -> BeanFactory */
-	private final Map<List<ResourceBundle>, ConfigurableApplicationContext> bundleCache =
-			new HashMap<>();
+	private final Map<List<ResourceBundle>, ConfigurableApplicationContext> bundleCache = new HashMap<>();
 
 
 	public void setOrder(int order) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,11 @@ import reactor.core.publisher.Mono;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
-import org.springframework.util.AntPathMatcher;
-import org.springframework.util.PathMatcher;
+import org.springframework.http.server.PathContainer;
 import org.springframework.util.ResourceUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.util.pattern.PathPattern;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * Lookup function used by {@link RouterFunctions#resources(String, Resource)}.
@@ -39,34 +40,35 @@ import org.springframework.util.StringUtils;
  */
 class PathResourceLookupFunction implements Function<ServerRequest, Mono<Resource>> {
 
-	private static final PathMatcher PATH_MATCHER = new AntPathMatcher();
+	private static final PathPatternParser PATTERN_PARSER = new PathPatternParser();
 
-	private final String pattern;
+	private final PathPattern pattern;
 
 	private final Resource location;
 
 
 	public PathResourceLookupFunction(String pattern, Resource location) {
-		this.pattern = pattern;
+		this.pattern = PATTERN_PARSER.parse(pattern);
 		this.location = location;
 	}
 
 
 	@Override
 	public Mono<Resource> apply(ServerRequest request) {
-		String path = processPath(request.path());
+		PathContainer pathContainer = request.pathContainer();
+		if (!this.pattern.matches(pathContainer)) {
+			return Mono.empty();
+		}
+
+		pathContainer = this.pattern.extractPathWithinPattern(pathContainer);
+		String path = processPath(pathContainer.value());
 		if (path.contains("%")) {
 			path = StringUtils.uriDecode(path, StandardCharsets.UTF_8);
 		}
 		if (!StringUtils.hasLength(path) || isInvalidPath(path)) {
 			return Mono.empty();
 		}
-		if (!PATH_MATCHER.match(this.pattern, path)) {
-			return Mono.empty();
-		}
-		else {
-			path = PATH_MATCHER.extractPathWithinPattern(this.pattern, path);
-		}
+
 		try {
 			Resource resource = this.location.createRelative(path);
 			if (resource.exists() && resource.isReadable() && isResourceUnderLocation(resource)) {
@@ -81,7 +83,7 @@ class PathResourceLookupFunction implements Function<ServerRequest, Mono<Resourc
 		}
 	}
 
-	private static String processPath(String path) {
+	private String processPath(String path) {
 		boolean slash = false;
 		for (int i = 0; i < path.length(); i++) {
 			if (path.charAt(i) == '/') {
@@ -98,7 +100,7 @@ class PathResourceLookupFunction implements Function<ServerRequest, Mono<Resourc
 		return (slash ? "/" : "");
 	}
 
-	private static boolean isInvalidPath(String path) {
+	private boolean isInvalidPath(String path) {
 		if (path.contains("WEB-INF") || path.contains("META-INF")) {
 			return true;
 		}
@@ -141,18 +143,20 @@ class PathResourceLookupFunction implements Function<ServerRequest, Mono<Resourc
 		if (locationPath.equals(resourcePath)) {
 			return true;
 		}
-		locationPath = (locationPath.endsWith("/") || locationPath.isEmpty() ? locationPath :
-				locationPath + "/");
+		locationPath = (locationPath.endsWith("/") || locationPath.isEmpty() ? locationPath : locationPath + "/");
 		if (!resourcePath.startsWith(locationPath)) {
 			return false;
 		}
-
-		if (resourcePath.contains("%")) {
-			if (StringUtils.uriDecode(resourcePath, StandardCharsets.UTF_8).contains("../")) {
-				return false;
-			}
+		if (resourcePath.contains("%") && StringUtils.uriDecode(resourcePath, StandardCharsets.UTF_8).contains("../")) {
+			return false;
 		}
 		return true;
+	}
+
+
+	@Override
+	public String toString() {
+		return this.pattern + " -> " + this.location;
 	}
 
 }
