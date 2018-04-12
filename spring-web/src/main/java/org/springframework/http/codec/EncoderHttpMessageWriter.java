@@ -16,7 +16,6 @@
 
 package org.springframework.http.codec;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -38,7 +37,7 @@ import org.springframework.util.Assert;
 /**
  * {@code HttpMessageWriter} that wraps and delegates to a {@link Encoder}.
  *
- * <p>Also a {@code ServerHttpMessageWriter} that pre-resolves encoding hints
+ * <p>Also a {@code HttpMessageWriter} that pre-resolves encoding hints
  * from the extra information available on the server side such as the request
  * or controller method annotations.
  *
@@ -47,23 +46,13 @@ import org.springframework.util.Assert;
  * @author Rossen Stoyanchev
  * @since 5.0
  */
-public class EncoderHttpMessageWriter<T> implements ServerHttpMessageWriter<T> {
-
-	/**
-	 * Default list of media types that signify a "streaming" scenario such that
-	 * there may be a time lag between items written and hence requires flushing.
-	 */
-	public static final List<MediaType> DEFAULT_STREAMING_MEDIA_TYPES =
-			Collections.singletonList(MediaType.APPLICATION_STREAM_JSON);
-
+public class EncoderHttpMessageWriter<T> implements HttpMessageWriter<T> {
 
 	private final Encoder<T> encoder;
 
 	private final List<MediaType> mediaTypes;
 
 	private final MediaType defaultMediaType;
-
-	private final List<MediaType> streamingMediaTypes = new ArrayList<>(1);
 
 
 	/**
@@ -74,7 +63,6 @@ public class EncoderHttpMessageWriter<T> implements ServerHttpMessageWriter<T> {
 		this.encoder = encoder;
 		this.mediaTypes = MediaType.asMediaTypes(encoder.getEncodableMimeTypes());
 		this.defaultMediaType = initDefaultMediaType(this.mediaTypes);
-		this.streamingMediaTypes.addAll(DEFAULT_STREAMING_MEDIA_TYPES);
 	}
 
 	private static MediaType initDefaultMediaType(List<MediaType> mediaTypes) {
@@ -92,23 +80,6 @@ public class EncoderHttpMessageWriter<T> implements ServerHttpMessageWriter<T> {
 	@Override
 	public List<MediaType> getWritableMediaTypes() {
 		return this.mediaTypes;
-	}
-
-	/**
-	 * Configure "streaming" media types for which flushing should be performed
-	 * automatically vs at the end of the input stream.
-	 * <p>By default this is set to {@link #DEFAULT_STREAMING_MEDIA_TYPES}.
-	 * @param mediaTypes one or more media types to add to the list
-	 */
-	public void setStreamingMediaTypes(List<MediaType> mediaTypes) {
-		this.streamingMediaTypes.addAll(mediaTypes);
-	}
-
-	/**
-	 * Return the configured list of "streaming" media types.
-	 */
-	public List<MediaType> getStreamingMediaTypes() {
-		return Collections.unmodifiableList(this.streamingMediaTypes);
 	}
 
 
@@ -159,11 +130,13 @@ public class EncoderHttpMessageWriter<T> implements ServerHttpMessageWriter<T> {
 	}
 
 	private boolean isStreamingMediaType(MediaType contentType) {
-		return this.streamingMediaTypes.stream().anyMatch(contentType::isCompatibleWith);
+		return this.encoder instanceof HttpMessageEncoder &&
+				((HttpMessageEncoder<?>) this.encoder).getStreamingMediaTypes().stream()
+						.anyMatch(contentType::isCompatibleWith);
 	}
 
 
-	// ServerHttpMessageWriter...
+	// Server side only...
 
 	@Override
 	public Mono<Void> write(Publisher<? extends T> inputStream, ResolvableType actualType,
@@ -180,13 +153,13 @@ public class EncoderHttpMessageWriter<T> implements ServerHttpMessageWriter<T> {
 	/**
 	 * Get additional hints for encoding for example based on the server request
 	 * or annotations from controller method parameters. By default, delegate to
-	 * the encoder if it is an instance of {@link ServerHttpEncoder}.
+	 * the encoder if it is an instance of {@link HttpMessageEncoder}.
 	 */
 	protected Map<String, Object> getWriteHints(ResolvableType streamType, ResolvableType elementType,
 			MediaType mediaType, ServerHttpRequest request, ServerHttpResponse response) {
 
-		if (this.encoder instanceof ServerHttpEncoder) {
-			ServerHttpEncoder<?> httpEncoder = (ServerHttpEncoder<?>) this.encoder;
+		if (this.encoder instanceof HttpMessageEncoder) {
+			HttpMessageEncoder<?> httpEncoder = (HttpMessageEncoder<?>) this.encoder;
 			return httpEncoder.getEncodeHints(streamType, elementType, mediaType, request, response);
 		}
 		return Collections.emptyMap();

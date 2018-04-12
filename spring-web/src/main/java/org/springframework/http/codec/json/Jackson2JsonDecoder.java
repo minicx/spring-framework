@@ -33,7 +33,7 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.codec.CodecException;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
-import org.springframework.http.codec.ServerHttpDecoder;
+import org.springframework.http.codec.HttpMessageDecoder;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
@@ -48,7 +48,7 @@ import org.springframework.util.MimeType;
  * @since 5.0
  * @see Jackson2JsonEncoder
  */
-public class Jackson2JsonDecoder extends Jackson2CodecSupport implements ServerHttpDecoder<Object> {
+public class Jackson2JsonDecoder extends Jackson2CodecSupport implements HttpMessageDecoder<Object> {
 
 	private final JsonObjectDecoder fluxDecoder = new JsonObjectDecoder(true);
 
@@ -67,9 +67,11 @@ public class Jackson2JsonDecoder extends Jackson2CodecSupport implements ServerH
 	@Override
 	public boolean canDecode(ResolvableType elementType, MimeType mimeType) {
 		JavaType javaType = this.mapper.getTypeFactory().constructType(elementType.getType());
-		return this.mapper.canDeserialize(javaType) &&
-				(mimeType == null || JSON_MIME_TYPES.stream().anyMatch(m -> m.isCompatibleWith(mimeType)));
+		// Skip String (CharSequenceDecoder + "*/*" comes after)
+		return !CharSequence.class.isAssignableFrom(elementType.resolve(Object.class)) &&
+				this.mapper.canDeserialize(javaType) && supportsMimeType(mimeType);
 	}
+
 
 	@Override
 	public List<MimeType> getDecodableMimeTypes() {
@@ -118,7 +120,7 @@ public class Jackson2JsonDecoder extends Jackson2CodecSupport implements ServerH
 	}
 
 
-	// ServerHttpDecoder...
+	// HttpMessageDecoder...
 
 	@Override
 	public Map<String, Object> getDecodeHints(ResolvableType actualType, ResolvableType elementType,

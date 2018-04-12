@@ -18,6 +18,7 @@ package org.springframework.web.reactive.accept;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -41,6 +42,8 @@ import org.springframework.web.util.UriUtils;
  */
 public class PathExtensionContentTypeResolver extends AbstractMappingContentTypeResolver {
 
+	private boolean useRegisteredExtensionsOnly = false;
+
 	private boolean ignoreUnknownExtensions = true;
 
 
@@ -61,6 +64,15 @@ public class PathExtensionContentTypeResolver extends AbstractMappingContentType
 
 
 	/**
+	 * Whether to only use the registered mappings to look up file extensions, or also refer to
+	 * defaults.
+	 * <p>By default this is set to {@code false}, meaning that defaults are used.
+	 */
+	public void setUseRegisteredExtensionsOnly(boolean useRegisteredExtensionsOnly) {
+		this.useRegisteredExtensionsOnly = useRegisteredExtensionsOnly;
+	}
+
+	/**
 	 * Whether to ignore requests with unknown file extension. Setting this to
 	 * {@code false} results in {@code HttpMediaTypeNotAcceptableException}.
 	 * <p>By default this is set to {@code true}.
@@ -79,14 +91,16 @@ public class PathExtensionContentTypeResolver extends AbstractMappingContentType
 
 	@Override
 	protected MediaType handleNoMatch(String key) throws NotAcceptableStatusException {
-		MediaType mediaType = MediaTypeFactory.getMediaType("file." + key);
-		if (mediaType != null) {
-			return mediaType;
+		if (!this.useRegisteredExtensionsOnly) {
+			Optional<MediaType> mediaType = MediaTypeFactory.getMediaType("file." + key);
+			if (mediaType.isPresent()) {
+				return mediaType.get();
+			}
 		}
-		if (!this.ignoreUnknownExtensions) {
-			throw new NotAcceptableStatusException(getAllMediaTypes());
+		if (this.ignoreUnknownExtensions) {
+			return null;
 		}
-		return null;
+		throw new NotAcceptableStatusException(getAllMediaTypes());
 	}
 
 	/**
@@ -105,7 +119,7 @@ public class PathExtensionContentTypeResolver extends AbstractMappingContentType
 			mediaType = getMediaType(extension);
 		}
 		if (mediaType == null) {
-			mediaType = MediaTypeFactory.getMediaType(filename);
+			mediaType = MediaTypeFactory.getMediaType(filename).orElse(null);
 		}
 		return mediaType;
 	}

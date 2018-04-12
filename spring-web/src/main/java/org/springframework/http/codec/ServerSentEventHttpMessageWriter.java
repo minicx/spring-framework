@@ -27,6 +27,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import org.springframework.core.ResolvableType;
+import org.springframework.core.codec.CodecException;
 import org.springframework.core.codec.Encoder;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
@@ -34,17 +35,16 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ReactiveHttpOutputMessage;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
-import org.springframework.util.Assert;
 
 /**
- * {@code ServerHttpMessageWriter} for {@code "text/event-stream"} responses.
+ * {@code HttpMessageWriter} for {@code "text/event-stream"} responses.
  *
  * @author Sebastien Deleuze
  * @author Arjen Poutsma
  * @author Rossen Stoyanchev
  * @since 5.0
  */
-public class ServerSentEventHttpMessageWriter implements ServerHttpMessageWriter<Object> {
+public class ServerSentEventHttpMessageWriter implements HttpMessageWriter<Object> {
 
 	private static final List<MediaType> WRITABLE_MEDIA_TYPES =
 			Collections.singletonList(MediaType.TEXT_EVENT_STREAM);
@@ -54,14 +54,28 @@ public class ServerSentEventHttpMessageWriter implements ServerHttpMessageWriter
 
 
 	/**
+	 * Constructor without an {@code Encoder}. In this mode only {@code String}
+	 * is supported for event data to be encoded.
+	 */
+	public ServerSentEventHttpMessageWriter() {
+		this(null);
+	}
+
+	/**
 	 * Constructor with JSON {@code Encoder} for encoding objects. Support for
 	 * {@code String} event data is built-in.
 	 */
 	public ServerSentEventHttpMessageWriter(Encoder<?> encoder) {
-		Assert.notNull(encoder, "'encoder' must not be null");
 		this.encoder = encoder;
 	}
 
+
+	/**
+	 * Return the configured {@code Encoder}, possibly {@code null}.
+	 */
+	public Encoder<?> getEncoder() {
+		return this.encoder;
+	}
 
 	@Override
 	public List<MediaType> getWritableMediaTypes() {
@@ -71,7 +85,7 @@ public class ServerSentEventHttpMessageWriter implements ServerHttpMessageWriter
 
 	@Override
 	public boolean canWrite(ResolvableType elementType, MediaType mediaType) {
-		return mediaType == null || MediaType.TEXT_EVENT_STREAM.isCompatibleWith(mediaType) ||
+		return mediaType == null || MediaType.TEXT_EVENT_STREAM.includes(mediaType) ||
 				ServerSentEvent.class.isAssignableFrom(elementType.getRawClass());
 	}
 
@@ -128,6 +142,10 @@ public class ServerSentEventHttpMessageWriter implements ServerHttpMessageWriter
 			return Flux.from(encodeText(text.replaceAll("\\n", "\ndata:") + "\n", factory));
 		}
 
+		if (this.encoder == null) {
+			return Flux.error(new CodecException("No SSE encoder configured and the data is not String."));
+		}
+
 		return ((Encoder<T>) this.encoder)
 				.encode(Mono.just((T) data), factory, valueType, MediaType.TEXT_EVENT_STREAM, hints)
 				.concatWith(encodeText("\n", factory));
@@ -154,8 +172,8 @@ public class ServerSentEventHttpMessageWriter implements ServerHttpMessageWriter
 	private Map<String, Object> getEncodeHints(ResolvableType actualType, ResolvableType elementType,
 			MediaType mediaType, ServerHttpRequest request, ServerHttpResponse response) {
 
-		if (this.encoder instanceof ServerHttpEncoder) {
-			ServerHttpEncoder<?> httpEncoder = (ServerHttpEncoder<?>) this.encoder;
+		if (this.encoder instanceof HttpMessageEncoder) {
+			HttpMessageEncoder<?> httpEncoder = (HttpMessageEncoder<?>) this.encoder;
 			return httpEncoder.getEncodeHints(actualType, elementType, mediaType, request, response);
 		}
 		return Collections.emptyMap();

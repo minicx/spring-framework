@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import org.springframework.core.ReactiveAdapterRegistry;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerHttpMessageReader;
+import org.springframework.http.codec.HttpMessageReader;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.util.Assert;
@@ -48,7 +48,7 @@ import org.springframework.web.server.UnsupportedMediaTypeStatusException;
 
 /**
  * Abstract base class for argument resolvers that resolve method arguments
- * by reading the request body with an {@link ServerHttpMessageReader}.
+ * by reading the request body with an {@link HttpMessageReader}.
  *
  * <p>Applies validation if the method argument is annotated with
  * {@code @javax.validation.Valid} or
@@ -60,16 +60,16 @@ import org.springframework.web.server.UnsupportedMediaTypeStatusException;
  */
 public abstract class AbstractMessageReaderArgumentResolver extends HandlerMethodArgumentResolverSupport {
 
-	private final List<ServerHttpMessageReader<?>> messageReaders;
+	private final List<HttpMessageReader<?>> messageReaders;
 
 	private final List<MediaType> supportedMediaTypes;
 
 
 	/**
-	 * Constructor with {@link ServerHttpMessageReader}'s and a {@link Validator}.
+	 * Constructor with {@link HttpMessageReader}'s and a {@link Validator}.
 	 * @param readers readers to convert from the request body
 	 */
-	protected AbstractMessageReaderArgumentResolver(List<ServerHttpMessageReader<?>> readers) {
+	protected AbstractMessageReaderArgumentResolver(List<HttpMessageReader<?>> readers) {
 		this(readers, new ReactiveAdapterRegistry());
 	}
 
@@ -78,7 +78,7 @@ public abstract class AbstractMessageReaderArgumentResolver extends HandlerMetho
 	 * @param messageReaders readers to convert from the request body
 	 * @param adapterRegistry for adapting to other reactive types from Flux and Mono
 	 */
-	protected AbstractMessageReaderArgumentResolver(List<ServerHttpMessageReader<?>> messageReaders,
+	protected AbstractMessageReaderArgumentResolver(List<HttpMessageReader<?>> messageReaders,
 			ReactiveAdapterRegistry adapterRegistry) {
 
 		super(adapterRegistry);
@@ -94,7 +94,7 @@ public abstract class AbstractMessageReaderArgumentResolver extends HandlerMetho
 	/**
 	 * Return the configured message converters.
 	 */
-	public List<ServerHttpMessageReader<?>> getMessageReaders() {
+	public List<HttpMessageReader<?>> getMessageReaders() {
 		return this.messageReaders;
 	}
 
@@ -113,8 +113,7 @@ public abstract class AbstractMessageReaderArgumentResolver extends HandlerMetho
 			mediaType = MediaType.APPLICATION_OCTET_STREAM;
 		}
 
-		for (ServerHttpMessageReader<?> reader : getMessageReaders()) {
-
+		for (HttpMessageReader<?> reader : getMessageReaders()) {
 			if (reader.canRead(elementType, mediaType)) {
 				Map<String, Object> readHints = Collections.emptyMap();
 				if (adapter != null && adapter.isMultiValue()) {
@@ -171,9 +170,9 @@ public abstract class AbstractMessageReaderArgumentResolver extends HandlerMetho
 	private Object[] extractValidationHints(MethodParameter parameter) {
 		Annotation[] annotations = parameter.getParameterAnnotations();
 		for (Annotation ann : annotations) {
-			Validated validAnnot = AnnotationUtils.getAnnotation(ann, Validated.class);
-			if (validAnnot != null || ann.annotationType().getSimpleName().startsWith("Valid")) {
-				Object hints = (validAnnot != null ? validAnnot.value() : AnnotationUtils.getValue(ann));
+			Validated validatedAnn = AnnotationUtils.getAnnotation(ann, Validated.class);
+			if (validatedAnn != null || ann.annotationType().getSimpleName().startsWith("Valid")) {
+				Object hints = (validatedAnn != null ? validatedAnn.value() : AnnotationUtils.getValue(ann));
 				return (hints instanceof Object[] ? (Object[]) hints : new Object[] {hints});
 			}
 		}

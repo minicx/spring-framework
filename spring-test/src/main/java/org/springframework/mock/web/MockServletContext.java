@@ -50,6 +50,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.MimeType;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.WebUtils;
@@ -263,14 +264,14 @@ public class MockServletContext implements ServletContext {
 	@Override
 	public String getMimeType(String filePath) {
 		String extension = StringUtils.getFilenameExtension(filePath);
-		MediaType result;
 		if (this.mimeTypes.containsKey(extension)) {
-			result = this.mimeTypes.get(extension);
+			return this.mimeTypes.get(extension).toString();
 		}
 		else {
-			result = MediaTypeFactory.getMediaType(filePath);
+			return MediaTypeFactory.getMediaType(filePath).
+					map(MimeType::toString)
+					.orElse(null);
 		}
-		return result != null ? result.toString() : null;
 	}
 
 	/**

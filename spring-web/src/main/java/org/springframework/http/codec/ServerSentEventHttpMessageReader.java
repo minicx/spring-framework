@@ -37,7 +37,6 @@ import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ReactiveHttpInputMessage;
-import org.springframework.util.Assert;
 
 import static java.util.stream.Collectors.joining;
 
@@ -56,20 +55,35 @@ public class ServerSentEventHttpMessageReader implements HttpMessageReader<Objec
 
 	private static final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
 
-	private static final StringDecoder stringDecoder = new StringDecoder(false);
+	private static final StringDecoder stringDecoder = StringDecoder.textPlainOnly(false);
 
 
 	private final Decoder<?> decoder;
 
 
 	/**
-	 * Constructor with JSON {@code Encoder} for encoding objects.
+	 * Constructor without a {@code Decoder}. In this mode only {@code String}
+	 * is supported as the data of an event.
+	 */
+	public ServerSentEventHttpMessageReader() {
+		this(null);
+	}
+
+	/**
+	 * Constructor with JSON {@code Decoder} for decoding to Objects. Support
+	 * for decoding to {@code String} event data is built-in.
 	 */
 	public ServerSentEventHttpMessageReader(Decoder<?> decoder) {
-		Assert.notNull(decoder, "Decoder must not be null");
 		this.decoder = decoder;
 	}
 
+
+	/**
+	 * Return the configured {@code Decoder}.
+	 */
+	public Decoder<?> getDecoder() {
+		return this.decoder;
+	}
 
 	@Override
 	public List<MediaType> getReadableMediaTypes() {
@@ -78,7 +92,7 @@ public class ServerSentEventHttpMessageReader implements HttpMessageReader<Objec
 
 	@Override
 	public boolean canRead(ResolvableType elementType, MediaType mediaType) {
-		return MediaType.TEXT_EVENT_STREAM.isCompatibleWith(mediaType) ||
+		return MediaType.TEXT_EVENT_STREAM.includes(mediaType) ||
 				ServerSentEvent.class.isAssignableFrom(elementType.getRawClass());
 	}
 
@@ -176,7 +190,8 @@ public class ServerSentEventHttpMessageReader implements HttpMessageReader<Objec
 	public Mono<Object> readMono(ResolvableType elementType, ReactiveHttpInputMessage message,
 			Map<String, Object> hints) {
 
-		// For single String give StringDecoder a chance which comes after SSE in the order
+		// We're ahead of String + "*/*"
+		// Let's see if we can aggregate the output (lest we time out)...
 
 		if (String.class.equals(elementType.getRawClass())) {
 			Flux<DataBuffer> body = message.getBody();
